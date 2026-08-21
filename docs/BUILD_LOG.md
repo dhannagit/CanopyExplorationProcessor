@@ -54,6 +54,18 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Implement the independent filtering and reduction engine using the metric and filter configuration models.
 
+## 2026-08-21 - Add playground.py for interactive function testing
+
+**Goal:** Create a script for the users/developers to explore functions and interactively test scripts developed by Github Co-Pilot and other developers
+
+**Changed:** Added `tests/playground.py` as a lightweight top-level scratchpad. It uses Tkinter file dialogs to select the raw exploration directory, `.dXpx` directory, and circuit workbook; loads one representative run; prints signal, turn-zone, exploration-variable, job, metric, and configuration information; and optionally saves and reloads an analysis configuration. It also handles cancellation, discovers `.dXpx` files recursively, reports missing summary signals, and cleans up the Tk root.
+
+**Decisions:** Keep this as a loose developer playground rather than a production GUI, reusable application module, or automated test. Use the first discovered `.dXpx` only as a convenient starting point; the full run-loading and analysis workflow will be implemented separately. Keep exploratory expressions and print statements easy to edit as new functions are added.
+
+**Evidence:** `tests/playground.py` compiles successfully with `python -m py_compile tests/playground.py`, and the editor reports no errors. The interactive flow has not been automated because it requires Tkinter dialogs and user-selected paths.
+
+**Next:** Use the playground to inspect the sample data while implementing the analysis/reduction engine, then add non-interactive tests for any behavior discovered here.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

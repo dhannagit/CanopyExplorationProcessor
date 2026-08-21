@@ -1,0 +1,56 @@
+{
+  "name": "Canopy Analysis",
+  "schema_version": 1,
+  "dataset": {
+    "dxpx_directory": "C:\\Bib\\Git\\CanopyExplorationProcessor\\DATA_dXpx\\MOS_COR_TyrePressureExploration",
+    "raw_directory": "C:\\Bib\\Git\\CanopyExplorationProcessor\\DATA_Raw\\MOS_COR_TyrePressureExploration",
+    "circuit_workbook": "C:\\Bib\\Git\\CanopyExplorationProcessor\\CircuitsData_Canopy_Hypercar.xlsx",
+    "baseline_path": null,
+    "generate_missing_turn_zones": true
+  },
+  "sweep_variables": [
+    {
+      "path": "car.tyres.front.INITIAL_CONDITIONS.InfPress",
+      "display_name": "Front Tyre Pressure",
+      "units": "bar",
+      "role": "x",
+      "scale": 1.0,
+      "offset": 0.0
+    }
+  ],
+  "metrics": [
+    "gCarPotential"
+  ],
+  "filters": {
+    "phases": [],
+    "turn_zones": [],
+    "phase_operator": "or",
+    "turn_zone_operator": "or",
+    "category_operator": "and"
+  },
+  "baseline": {
+    "mode": "none",
+    "run_index": null,
+    "external_path": null,
+    "lap_index": null,
+    "delta_mode": "none"
+  },
+  "plot": {
+    "plot_type": "line",
+    "x_variable": "car.tyres.front.INITIAL_CONDITIONS.InfPress",
+    "y_variable": null,
+    "facet_variables": [],
+    "color_variable": null,
+    "annotate": true
+  },
+  "export": {
+    "output_directory": null,
+    "formats": [
+      "svg",
+      "png",
+      "csv",
+      "json"
+    ],
+    "include_configuration": true
+  }
+}

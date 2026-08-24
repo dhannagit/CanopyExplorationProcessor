@@ -11,6 +11,7 @@ from canopy_processor import (
     DatasetConfig,
     PlotConfig,
     SweepVariableConfig,
+    FilterConfig,
     add_turn_zones,
     default_metrics,
     discover_job_variables,
@@ -18,6 +19,8 @@ from canopy_processor import (
     load_dxpx,
     load_exploration_definition,
     load_job_records,
+    analyze_runs,
+    analyze_metric
 )
 
 
@@ -131,6 +134,7 @@ try:
             plot_type="line",
             x_variable="car.tyres.front.INITIAL_CONDITIONS.InfPress",
         ),
+        filters=FilterConfig(phases=("isApex",))
     )
 
     config.validate()
@@ -154,6 +158,21 @@ try:
     )
     if load_path:
         loaded_config = AnalysisConfig.load(load_path)
-        print(f"Loaded configuration: {loaded_config.name}")
+        print(f"Loaded configuration: {loaded_config.name}\n")
+
+    filters = config.filters
+
+    results = analyze_runs(
+        runs=[run_with_turn_zones],
+        metric=metrics["gCarPotential"],
+        filters=filters,
+        method="mean",
+    )
+
+    for result in results:
+        print(
+            f"Run: {run_with_turn_zones.path}, Metric: {result.metric_name}, "
+            f"Mean: {result.value}, Samples: {result.selected_samples}"
+        )
 finally:
     root.destroy()

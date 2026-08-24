@@ -10,6 +10,7 @@ from .config import (
 	PlotConfig,
 	SweepVariableConfig,
 )
+from .analysis import MetricResult, analyze_metric, analyze_runs, build_filter_mask, reduce_signal
 from .exploration import (
 	ExplorationDefinition,
 	JobRecord,
@@ -25,6 +26,7 @@ __all__ = [
 	"DXPXLoadError",
 	"DXPXRun",
 	"AnalysisConfig",
+	"MetricResult",
 	"BaselineConfig",
 	"DatasetConfig",
 	"ExportConfig",
@@ -37,12 +39,16 @@ __all__ = [
 	"SweepVariableConfig",
 	"TurnZoneError",
 	"add_turn_zones",
+	"analyze_metric",
+	"analyze_runs",
 	"average_metric",
 	"default_metrics",
+	"build_filter_mask",
 	"discover_job_variables",
 	"evaluate_metric",
 	"load_job_records",
 	"load_exploration_definition",
 	"load_dxpx",
+	"reduce_signal",
 	"source_metric",
 ]

@@ -66,6 +66,18 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Use the playground to inspect the sample data while implementing the analysis/reduction engine, then add non-interactive tests for any behavior discovered here.
 
+## 2026-08-21 - Add analysis and reduction engine
+
+**Goal:** Convert evaluated metric signals into filtered, one-value-per-run analysis results independently of the GUI and plotting layers.
+
+**Changed:** Added `src/canopy_processor/analysis.py` with `MetricResult`, `build_filter_mask`, `reduce_signal`, `analyze_metric`, and `analyze_runs`. The module supports phase and turn-zone mask selection, configurable AND/OR combinations, NaN-aware mean/median/minimum/maximum/peak reductions, scalar metrics, and sample-count diagnostics. Added focused analysis tests and public package exports.
+
+**Decisions:** Empty filter categories mean no restriction. Operators combine selections within each category, then combine phase and turn-zone categories. Scalar metrics bypass time-series masks. Baseline comparison, sweep-value joins, duplicate handling, and plotting remain separate future layers.
+
+**Evidence:** Synthetic mask tests and real-sample turn-zone/metric tests pass. Full test suite passes with 14 tests and no editor diagnostics in the changed analysis files.
+
+**Next:** Build a normalized multi-run result table that joins `MetricResult` values with discovered sweep-variable values, then add explicit baseline comparison.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

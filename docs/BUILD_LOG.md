@@ -90,6 +90,18 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Add baseline comparison (absolute/percent delta) using the existing `BaselineConfig` and the joined result rows in `results.py`.
 
+## 2026-08-25 - Add baseline comparison
+
+**Goal:** Compare each sweep run's reduced metric value against a baseline, supporting no baseline, a loaded sweep run, or an external multi-lap study.
+
+**Changed:** Added `load_dxpx_laps` to `dxpx.py` so a `.dxpx` file can hold either a single lap (sweep runs) or a MATLAB struct array of laps (confirmed against `BaselineExample`, which has 11 laps); `load_dxpx` now rejects multi-lap files with a clear error instead of silently reading the first lap. Renamed `BaselineConfig.lap_index` to `lap_indices: tuple[int, ...]` (zero-based) so multiple laps can be selected and pooled. Added to `results.py`: `BaselineResult`, `ComparedRow`, `resolve_baseline_laps` (looks up a loaded run by `run_index` or loads/selects laps from an external file), `analyze_baseline` (pools selected laps' filtered samples into one reduction, not an average of averages), and `compute_delta`/`compare_rows_to_baseline` for absolute/percent deltas. Added tests for multi-lap loading and every baseline function.
+
+**Decisions:** Multiple selected baseline laps are combined by pooling their filtered samples before reducing once, per your answer, rather than averaging per-lap results. Baseline laps must already carry turn-zone fields if the filter needs them, matching how `analyze_metric` already expects sweep runs to be prepared. A zero or NaN baseline (or NaN value) produces `nan` with `baseline_valid=False` instead of raising or dividing by zero, per your answer. Baseline filtering and turn-zone preparation should match the metric's, per your answers.
+
+**Evidence:** Full test suite passes with 29 tests, including a real 11-lap `BaselineExample` file and the real sweep sample.
+
+**Next:** Wire `resolve_baseline_laps`/`analyze_baseline`/`compare_rows_to_baseline` into a full playground example, then add duplicate-point and missing-cell handling for multi-dimensional sweeps.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

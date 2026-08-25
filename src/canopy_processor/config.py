@@ -80,7 +80,7 @@ class BaselineConfig:
 	mode: str = "none"
 	run_index: int | None = None
 	external_path: Path | None = None
-	lap_index: int | None = None
+	lap_indices: tuple[int, ...] = ()
 	delta_mode: str = "none"
 
 	def __post_init__(self) -> None:
@@ -94,8 +94,8 @@ class BaselineConfig:
 			raise ValueError("loaded_run baseline requires run_index")
 		if self.mode == "external_study" and self.external_path is None:
 			raise ValueError("external_study baseline requires external_path")
-		if self.lap_index is not None and self.lap_index < 0:
-			raise ValueError("lap_index cannot be negative")
+		if any(index < 0 for index in self.lap_indices):
+			raise ValueError("lap_indices cannot contain negative values")
 
 
 @dataclass
@@ -207,7 +207,7 @@ def _build_dataclass(model: type[Any], values: dict[str, Any]) -> Any:
 	for field_name in ("dxpx_directory", "raw_directory", "circuit_workbook", "baseline_path", "external_path", "output_directory"):
 		if field_name in converted and converted[field_name] is not None:
 			converted[field_name] = Path(converted[field_name])
-	for field_name in ("phases", "turn_zones", "facet_variables", "formats"):
+	for field_name in ("phases", "turn_zones", "facet_variables", "formats", "lap_indices"):
 		if field_name in converted:
 			converted[field_name] = tuple(converted[field_name])
 	return model(**converted)

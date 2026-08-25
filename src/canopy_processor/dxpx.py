@@ -45,7 +45,27 @@ class DXPXRun:
 
 
 def load_dxpx(path: str | Path) -> DXPXRun:
-    """Load one Canopy ``.dxpx`` MAT file into a :class:`DXPXRun`."""
+    """Load one Canopy ``.dxpx`` MAT file that contains a single lap.
+
+    Sweep run folders always hold exactly one lap; use load_dxpx_laps for
+    baseline files, which may hold several.
+    """
+
+    laps = load_dxpx_laps(path)
+    if len(laps) != 1:
+        raise DXPXLoadError(
+            f"Expected a single-lap DXPX file but found {len(laps)} laps: {path}"
+        )
+    return laps[0]
+
+
+def load_dxpx_laps(path: str | Path) -> list[DXPXRun]:
+    """Load a Canopy ``.dxpx`` MAT file that may hold one lap or an array of laps.
+
+    Baseline studies store multiple laps as a MATLAB struct array; sweep run
+    files hold exactly one. Every returned :class:`DXPXRun` shares the same
+    source ``path`` because laps are not separate files.
+    """
 
     file_path = Path(path)
     if not file_path.is_file():
@@ -65,19 +85,33 @@ def load_dxpx(path: str | Path) -> DXPXRun:
     if raw_result is None:
         raise DXPXLoadError(f"DXPX file has no top-level D variable: {file_path}")
 
-    result = _matlab_struct_to_mapping(raw_result)
-    if not isinstance(result, dict) or not isinstance(result.get("Header"), dict):
-        raise DXPXLoadError(f"DXPX D variable has no Header struct: {file_path}")
-    if not isinstance(result.get("Data"), dict):
-        raise DXPXLoadError(f"DXPX D variable has no Data struct: {file_path}")
+    laps: list[DXPXRun] = []
+    for raw_lap in _iter_struct_entries(raw_result, file_path):
+        result = _matlab_struct_to_mapping(raw_lap)
+        if not isinstance(result, dict) or not isinstance(result.get("Header"), dict):
+            raise DXPXLoadError(f"DXPX D variable has no Header struct: {file_path}")
+        if not isinstance(result.get("Data"), dict):
+            raise DXPXLoadError(f"DXPX D variable has no Data struct: {file_path}")
+        laps.append(
+            DXPXRun(
+                path=file_path,
+                header=result["Header"],
+                data=result["Data"],
+                unit=result.get("Unit"),
+                type_info=result.get("Type"),
+            )
+        )
+    return laps
 
-    return DXPXRun(
-        path=file_path,
-        header=result["Header"],
-        data=result["Data"],
-        unit=result.get("Unit"),
-        type_info=result.get("Type"),
-    )
+
+def _iter_struct_entries(raw_result: Any, file_path: Path) -> list[Any]:
+    """Return each struct entry whether ``D`` is a scalar struct or an array."""
+
+    if hasattr(raw_result, "_fieldnames"):
+        return [raw_result]
+    if isinstance(raw_result, np.ndarray):
+        return list(raw_result.flat)
+    raise DXPXLoadError(f"DXPX D variable is neither a struct nor a struct array: {file_path}")
 
 
 def _matlab_struct_to_mapping(value: Any) -> Any:

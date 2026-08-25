@@ -1,8 +1,8 @@
 """Filtering and reduction of Canopy metrics.
 
-This module sits between metric definitions and future plotting code. It turns
-time-series signals into one value per run while keeping the filter behavior
-explicit and testable.
+This module reduces one run's metric signal to one value using phase and
+turn-zone masks. Joining reduced results across many runs to their
+sweep-variable coordinates is a separate concern; see results.py.
 """
 
 from __future__ import annotations

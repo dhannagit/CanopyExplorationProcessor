@@ -1,6 +1,6 @@
 """Core loading and normalization utilities for Canopy explorations."""
 
-from .dxpx import DXPXLoadError, DXPXRun, load_dxpx
+from .dxpx import DXPXLoadError, DXPXRun, load_dxpx, load_dxpx_laps
 from .config import (
 	AnalysisConfig,
 	BaselineConfig,
@@ -26,7 +26,17 @@ from .exploration import (
 	load_exploration_definition,
 )
 from .metric import Metric, average_metric, default_metrics, evaluate_metric, source_metric
-from .results import AnalysisRow, join_sweep_variables, run_index
+from .results import (
+	AnalysisRow,
+	BaselineResult,
+	ComparedRow,
+	analyze_baseline,
+	compare_rows_to_baseline,
+	compute_delta,
+	join_sweep_variables,
+	resolve_baseline_laps,
+	run_index,
+)
 from .turn_zones import TurnZoneError, add_turn_zones
 
 __all__ = [
@@ -34,6 +44,8 @@ __all__ = [
 	"DXPXRun",
 	"AnalysisConfig",
 	"AnalysisRow",
+	"BaselineResult",
+	"ComparedRow",
 	"MetricResult",
 	"BaselineConfig",
 	"DatasetConfig",
@@ -47,18 +59,23 @@ __all__ = [
 	"SweepVariableConfig",
 	"TurnZoneError",
 	"add_turn_zones",
+	"analyze_baseline",
 	"analyze_metric",
 	"analyze_runs",
 	"average_metric",
 	"default_metrics",
 	"build_filter_mask",
+	"compare_rows_to_baseline",
+	"compute_delta",
 	"discover_job_variables",
 	"evaluate_metric",
 	"join_sweep_variables",
 	"load_job_records",
 	"load_exploration_definition",
 	"load_dxpx",
+	"load_dxpx_laps",
 	"reduce_signal",
+	"resolve_baseline_laps",
 	"run_index",
 	"source_metric",
 ]

@@ -102,6 +102,18 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Wire `resolve_baseline_laps`/`analyze_baseline`/`compare_rows_to_baseline` into a full playground example, then add duplicate-point and missing-cell handling for multi-dimensional sweeps.
 
+## 2026-08-25 - Add missing-run and duplicate-point grid diagnostics
+
+**Goal:** Stop `join_sweep_variables` results from silently hiding failed/missing jobs or overwriting duplicate sweep points, matching the original MATLAB scripts' known defects here.
+
+**Changed:** Added to `results.py`: `find_missing_runs(job_records, rows)`, which reports simulation job indices (excluding the post-processor job) that produced no analyzed row, so a failed job is visible instead of just absent; and `build_grid(rows, variable_paths=None, duplicate_method="mean")`, which groups rows by sweep coordinate and combines duplicates using `mean`/`median`/`first`/`last`, or raises with `error` for cases that must be reviewed manually. Rows whose coordinate contains NaN (e.g. a sweep value the job-document never reported) are returned separately as `GridResult.incomplete_rows` instead of being silently placed or dropped. Added `GridPoint`/`GridResult` dataclasses and tests for missing jobs, duplicate aggregation, the `error` method, and NaN coordinates.
+
+**Decisions:** Default duplicate aggregation is `mean` over the duplicate rows' already-reduced values (not re-pooling raw samples, since `analyze_runs` already reduced each run independently); `selected_samples`/`available_samples` are summed across duplicates for provenance. Grid points mixing different metric names, or rows missing a requested sweep-variable path, raise immediately rather than producing a malformed grid.
+
+**Evidence:** Full test suite passes with 34 tests.
+
+**Next:** Wire `find_missing_runs`/`build_grid` into a playground example alongside the baseline comparison, then start the plot-data builder that consumes `GridResult`.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

@@ -9,6 +9,7 @@ import numpy as np
 from canopy_processor import (
     AnalysisConfig,
     DatasetConfig,
+    BaselineConfig,
     PlotConfig,
     SweepVariableConfig,
     FilterConfig,
@@ -17,12 +18,47 @@ from canopy_processor import (
     discover_job_variables,
     evaluate_metric,
     load_dxpx,
+    load_dxpx_laps,
     load_exploration_definition,
     load_job_records,
     analyze_runs,
+    analyze_baseline,
     analyze_metric,
-    join_sweep_variables
+    join_sweep_variables,
+    resolve_baseline_laps,
+    compare_rows_to_baseline
 )
+
+
+def _lap_label(index: int, lap) -> str:
+    lap_number_field = lap.data.get("NLap")
+    lap_number = int(np.asarray(lap_number_field).reshape(-1)[0]) if lap_number_field is not None else index + 1
+    lap_time_field = lap.data.get("tLapEnd")
+    lap_time = f"{float(np.asarray(lap_time_field).reshape(-1)[0]):.3f}s" if lap_time_field is not None else "unknown"
+    return f"Lap {lap_number} - {lap_time}"
+
+
+def _prompt_lap_indices(parent: tk.Tk, laps: list) -> tuple[int, ...]:
+    """Show a multi-select listbox of laps and return the chosen indices."""
+
+    dialog = tk.Toplevel(parent)
+    dialog.title("Select Baseline Laps")
+    dialog.grab_set()
+    tk.Label(dialog, text="Select one or more laps to combine as the baseline:").pack(padx=10, pady=(10, 0))
+    listbox = tk.Listbox(dialog, selectmode=tk.MULTIPLE, exportselection=False, width=40, height=min(15, len(laps)))
+    for index, lap in enumerate(laps):
+        listbox.insert(tk.END, _lap_label(index, lap))
+    listbox.pack(padx=10, pady=10)
+
+    selected: list[int] = []
+
+    def on_ok() -> None:
+        selected.extend(listbox.curselection())
+        dialog.destroy()
+
+    tk.Button(dialog, text="OK", command=on_ok).pack(pady=(0, 10))
+    dialog.wait_window()
+    return tuple(selected)
 
 
 root = tk.Tk()
@@ -46,6 +82,16 @@ try:
     dxpx_files = sorted(Path(dxpx_directory).rglob("*.dXpx"))
     if not dxpx_files:
         raise FileNotFoundError(f"No .dXpx files found below: {dxpx_directory}")
+
+    baseline_file = filedialog.askopenfilename(
+        parent=root,
+        title="Select the baseline .dXpx file",
+        filetypes=[("DXPX files", "*.dXpx")],
+    )
+    if not baseline_file:
+        raise RuntimeError("No baseline .dXpx file selected.")
+
+    baseline_run = load_dxpx_laps(baseline_file)
 
     # Load one run as a convenient starting point for interactive exploration.
     run = load_dxpx(dxpx_files[0])
@@ -120,22 +166,21 @@ try:
         result = evaluate_metric(metrics, name, run_with_turn_zones)
         print(f"Metric: {name}, shape={result.shape}, mean={np.nanmean(result)}")
 
-    # Join reduced metric results back to their sweep-variable coordinates.
-    filters = FilterConfig(phases=("isApex",))
-    grip_results = analyze_runs(runs, metrics["gCarPotential"], filters, method="mean")
-    rows = join_sweep_variables(runs, grip_results, job_variables)
-    for row in rows:
-        print(
-            f"Run {row.run_index}: {row.sweep_values} -> "
-            f"{row.metric_result.method} {row.metric_result.metric_name}="
-            f"{row.metric_result.value:.4f}"
-        )
+    lap_indices = (0,) if len(baseline_run) == 1 else _prompt_lap_indices(root, baseline_run)
+    if not lap_indices:
+        raise RuntimeError("No baseline laps selected.")
 
     config = AnalysisConfig(
         dataset=DatasetConfig(
             dxpx_directory=Path(dxpx_directory),
             raw_directory=Path(raw_directory),
             circuit_workbook=Path(circuit_data_path),
+        ),
+        baseline=BaselineConfig(
+            mode="external_study",
+            external_path=Path(baseline_file),
+            lap_indices=lap_indices,
+            delta_mode="absolute"
         ),
         sweep_variables=[
             SweepVariableConfig(
@@ -178,17 +223,20 @@ try:
 
     filters = config.filters
 
-    results = analyze_runs(
-        runs=[run_with_turn_zones],
-        metric=metrics["gCarPotential"],
-        filters=filters,
-        method="mean",
-    )
 
-    for result in results:
+    # Join reduced metric results back to their sweep-variable coordinates and compare to baseline.
+    filters = FilterConfig(phases=("isApex",))
+    grip_results = analyze_runs(runs, metrics["gCarPotential"], filters, method="mean")
+    rows = join_sweep_variables(runs, grip_results, job_variables)
+    laps = resolve_baseline_laps(config.baseline)
+    baseline_grip = analyze_baseline(laps, metrics["gCarPotential"], filters, method="mean")
+    compared = compare_rows_to_baseline(rows, baseline_grip, delta_mode=config.baseline.delta_mode)
+    for (row, comparison) in zip(rows, compared):
         print(
-            f"Run: {run_with_turn_zones.path}, Metric: {result.metric_name}, "
-            f"Mean: {result.value}, Samples: {result.selected_samples}"
+            f"Run {row.run_index}: {row.sweep_values} -> "
+            f"{row.metric_result.method} {row.metric_result.metric_name}= "
+            f"{row.metric_result.value:.4f} "
+            f"{comparison.delta_mode} difference = {comparison.delta:.4f}"
         )
 finally:
     root.destroy()

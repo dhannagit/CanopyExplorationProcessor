@@ -6,12 +6,15 @@ import pytest
 from canopy_processor import (
 	BaselineConfig,
 	BaselineResult,
+	JobRecord,
 	MetricResult,
 	SweepVariable,
 	analyze_baseline,
+	build_grid,
 	compare_rows_to_baseline,
 	compute_delta,
 	default_metrics,
+	find_missing_runs,
 	join_sweep_variables,
 	load_dxpx,
 	load_dxpx_laps,
@@ -143,3 +146,64 @@ def test_resolve_baseline_laps_requires_lap_indices_for_multi_lap_file() -> None
 
 	with pytest.raises(ValueError, match="lap_indices"):
 		resolve_baseline_laps(config)
+
+
+def _fake_job_record(index: int, is_post_processor: bool = False) -> JobRecord:
+	return JobRecord(
+		index=index,
+		name=f"Factorial {index}",
+		state="successful",
+		is_post_processor=is_post_processor,
+		changes=(),
+		error_messages=(),
+	)
+
+
+def _fake_row(folder_index: int, value: float, pressure: float) -> AnalysisRow:
+	return AnalysisRow(
+		run_index=folder_index,
+		sweep_values={"pressure": pressure},
+		metric_result=MetricResult("gCarPotential", value, "mean", 10, 10),
+	)
+
+
+def test_find_missing_runs_reports_jobs_with_no_row() -> None:
+	job_records = [_fake_job_record(0), _fake_job_record(1), _fake_job_record(2, is_post_processor=True)]
+	rows = [_fake_row(0, 1.0, 1.8)]
+
+	assert find_missing_runs(job_records, rows) == (1,)
+
+
+def test_build_grid_aggregates_duplicate_points_by_mean() -> None:
+	rows = [_fake_row(0, 1.0, 1.8), _fake_row(1, 3.0, 1.8), _fake_row(2, 2.0, 1.9)]
+
+	result = build_grid(rows)
+
+	points = {tuple(point.sweep_values.items()): point for point in result.points}
+	duplicate_point = points[(("pressure", 1.8),)]
+	assert duplicate_point.metric_result.value == pytest.approx(2.0)
+	assert duplicate_point.run_indices == (0, 1)
+	assert duplicate_point.metric_result.selected_samples == 20
+	assert result.incomplete_rows == ()
+
+
+def test_build_grid_raises_on_duplicates_when_method_is_error() -> None:
+	rows = [_fake_row(0, 1.0, 1.8), _fake_row(1, 3.0, 1.8)]
+
+	with pytest.raises(ValueError, match="Duplicate sweep point"):
+		build_grid(rows, duplicate_method="error")
+
+
+def test_build_grid_separates_rows_with_nan_coordinates() -> None:
+	rows = [_fake_row(0, 1.0, 1.8), _fake_row(1, 2.0, float("nan"))]
+
+	result = build_grid(rows)
+
+	assert len(result.points) == 1
+	assert len(result.incomplete_rows) == 1
+	assert result.incomplete_rows[0].run_index == 1
+
+
+def test_build_grid_rejects_unknown_duplicate_method() -> None:
+	with pytest.raises(ValueError, match="duplicate_method"):
+		build_grid([_fake_row(0, 1.0, 1.8)], duplicate_method="bogus")

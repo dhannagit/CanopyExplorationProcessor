@@ -16,8 +16,11 @@ import numpy as np
 from .analysis import MetricResult, build_filter_mask, reduce_signal
 from .config import BaselineConfig, FilterConfig
 from .dxpx import DXPXRun, load_dxpx_laps
-from .exploration import SweepVariable
+from .exploration import JobRecord, SweepVariable
 from .metric import Metric
+
+
+DUPLICATE_METHODS = {"mean", "median", "first", "last", "error"}
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,23 @@ class ComparedRow:
 	delta_mode: str
 	delta: float
 	baseline_valid: bool
+
+
+@dataclass(frozen=True)
+class GridPoint:
+	"""One deduplicated sweep coordinate, with the run(s) that produced it."""
+
+	sweep_values: dict[str, float]
+	metric_result: MetricResult
+	run_indices: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class GridResult:
+	"""A deduplicated grid plus rows that could not be placed on it."""
+
+	points: tuple[GridPoint, ...]
+	incomplete_rows: tuple[AnalysisRow, ...]
 
 
 def run_index(run: DXPXRun) -> int:
@@ -92,6 +112,91 @@ def join_sweep_variables(
 			sweep_values[variable.path] = variable.values[index]
 		rows.append(AnalysisRow(run_index=index, sweep_values=sweep_values, metric_result=result))
 	return rows
+
+
+def find_missing_runs(job_records: Iterable[JobRecord], rows: Iterable[AnalysisRow]) -> tuple[int, ...]:
+	"""Return simulation job indices that produced no analyzed row.
+
+	Compares every non-post-processor job against the rows actually analyzed,
+	so a failed job or an unparsed run is reported instead of silently absent.
+	"""
+
+	expected = {record.index for record in job_records if not record.is_post_processor}
+	present = {row.run_index for row in rows}
+	return tuple(sorted(expected - present))
+
+
+def build_grid(
+	rows: Iterable[AnalysisRow],
+	variable_paths: Iterable[str] | None = None,
+	duplicate_method: str = "mean",
+) -> GridResult:
+	"""Group analysis rows onto a sweep-coordinate grid.
+
+	Rows sharing the same coordinate are combined using ``duplicate_method``
+	(``mean``, ``median``, ``first``, ``last``, or ``error`` to reject
+	duplicates outright) rather than silently overwriting one another. Rows
+	with a NaN coordinate value cannot be placed and are returned separately
+	in ``incomplete_rows`` rather than dropped.
+	"""
+
+	if duplicate_method not in DUPLICATE_METHODS:
+		raise ValueError(f"Unknown duplicate_method: {duplicate_method}")
+
+	row_list = list(rows)
+	if not row_list:
+		return GridResult(points=(), incomplete_rows=())
+
+	paths = list(variable_paths) if variable_paths is not None else sorted(row_list[0].sweep_values)
+
+	groups: dict[tuple[float, ...], list[AnalysisRow]] = {}
+	incomplete: list[AnalysisRow] = []
+	for row in row_list:
+		missing = [path for path in paths if path not in row.sweep_values]
+		if missing:
+			raise ValueError(f"Run {row.run_index} is missing sweep variables: {missing}")
+		coordinate = tuple(row.sweep_values[path] for path in paths)
+		if any(np.isnan(value) for value in coordinate):
+			incomplete.append(row)
+			continue
+		groups.setdefault(coordinate, []).append(row)
+
+	points: list[GridPoint] = []
+	for coordinate, group in groups.items():
+		if duplicate_method == "error" and len(group) > 1:
+			raise ValueError(
+				f"Duplicate sweep point {dict(zip(paths, coordinate))} "
+				f"from runs {[row.run_index for row in group]}"
+			)
+		metric_names = {row.metric_result.metric_name for row in group}
+		if len(metric_names) > 1:
+			raise ValueError(f"Sweep point {coordinate} mixes different metrics: {metric_names}")
+
+		values = [row.metric_result.value for row in group]
+		if duplicate_method == "first":
+			aggregated_value = values[0]
+		elif duplicate_method == "last":
+			aggregated_value = values[-1]
+		elif duplicate_method == "median":
+			aggregated_value = float(np.nanmedian(values))
+		else:
+			aggregated_value = float(np.nanmean(values))
+
+		points.append(
+			GridPoint(
+				sweep_values=dict(zip(paths, coordinate)),
+				metric_result=MetricResult(
+					metric_name=group[0].metric_result.metric_name,
+					value=aggregated_value,
+					method=group[0].metric_result.method,
+					selected_samples=sum(row.metric_result.selected_samples for row in group),
+					available_samples=sum(row.metric_result.available_samples for row in group),
+				),
+				run_indices=tuple(sorted(row.run_index for row in group)),
+			)
+		)
+
+	return GridResult(points=tuple(points), incomplete_rows=tuple(incomplete))
 
 
 def resolve_baseline_laps(

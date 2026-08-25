@@ -78,6 +78,18 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Build a normalized multi-run result table that joins `MetricResult` values with discovered sweep-variable values, then add explicit baseline comparison.
 
+## 2026-08-25 - Join metric results to sweep-variable values
+
+**Goal:** Combine each run's reduced metric value with the sweep-variable values that produced it.
+
+**Changed:** Added `src/canopy_processor/results.py` with `AnalysisRow`, `run_index`, and `join_sweep_variables`. This was first added to `analysis.py`, then moved out: `analysis.py` reduces one run's metric to one value, while joining reduced results across many runs to sweep-variable coordinates is the distinct concern the original implementation plan called a separate "N-dimensional table" step. `analysis.py` no longer imports `exploration.py`. Moved the corresponding tests to `tests/test_results.py`. Updated `tests/playground.py` to load every run in the sweep and print joined sweep-value/metric rows instead of a manual zip.
+
+**Decisions:** Join by numbered folder index, matching how `discover_job_variables` indexes its arrays, instead of relying on list order. Raise a clear error for non-numbered run folders or out-of-range sweep-variable values rather than silently misaligning results. Keep `results.py` as the place duplicate-point aggregation, missing-cell diagnostics, and baseline deltas will be added, so `analysis.py` stays limited to single-run filtering and reduction.
+
+**Evidence:** Focused and full test suites pass with 18 tests. Playground compiles with `python -m py_compile`.
+
+**Next:** Add baseline comparison (absolute/percent delta) using the existing `BaselineConfig` and the joined result rows in `results.py`.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

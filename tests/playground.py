@@ -20,7 +20,8 @@ from canopy_processor import (
     load_exploration_definition,
     load_job_records,
     analyze_runs,
-    analyze_metric
+    analyze_metric,
+    join_sweep_variables
 )
 
 
@@ -85,6 +86,10 @@ try:
         zone = np.asarray(run_with_turn_zones.data["isTurnZone1"])
         print(f"Turn zone 1 samples: {zone.sum()} / {zone.size}")
 
+    # Load every run so results can be joined across the full sweep.
+    runs = [add_turn_zones(load_dxpx(path), circuit_data_path) for path in dxpx_files]
+    print(f"\nLoaded {len(runs)} runs for sweep-wide analysis")
+
     definition = load_exploration_definition(raw_directory)
     job_variables = discover_job_variables(raw_directory)
     job_records = load_job_records(raw_directory)
@@ -114,6 +119,17 @@ try:
     for name in metrics:
         result = evaluate_metric(metrics, name, run_with_turn_zones)
         print(f"Metric: {name}, shape={result.shape}, mean={np.nanmean(result)}")
+
+    # Join reduced metric results back to their sweep-variable coordinates.
+    filters = FilterConfig(phases=("isApex",))
+    grip_results = analyze_runs(runs, metrics["gCarPotential"], filters, method="mean")
+    rows = join_sweep_variables(runs, grip_results, job_variables)
+    for row in rows:
+        print(
+            f"Run {row.run_index}: {row.sweep_values} -> "
+            f"{row.metric_result.method} {row.metric_result.metric_name}="
+            f"{row.metric_result.value:.4f}"
+        )
 
     config = AnalysisConfig(
         dataset=DatasetConfig(

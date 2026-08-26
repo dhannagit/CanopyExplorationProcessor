@@ -37,6 +37,13 @@ from .plot_data import (
 	build_parallel_coordinates_data,
 	build_plot_data,
 )
+from .plotting import (
+	render_faceted_heatmap,
+	render_heatmap,
+	render_line,
+	render_parallel_coordinates,
+	render_plot_data,
+)
 from .results import (
 	AnalysisRow,
 	BaselineResult,
@@ -90,6 +97,11 @@ __all__ = [
 	"build_line_data",
 	"build_parallel_coordinates_data",
 	"build_plot_data",
+	"render_faceted_heatmap",
+	"render_heatmap",
+	"render_line",
+	"render_parallel_coordinates",
+	"render_plot_data",
 	"build_filter_mask",
 	"build_grid",
 	"compare_rows_to_baseline",

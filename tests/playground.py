@@ -3,6 +3,7 @@
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import numpy as np
 
@@ -29,6 +30,10 @@ from canopy_processor import (
     compare_rows_to_baseline,
     build_grid,
     build_heatmap_data,
+    render_line,
+    render_parallel_coordinates,
+    render_heatmap,
+    render_faceted_heatmap
 )
 
 
@@ -260,5 +265,14 @@ try:
     print(f"Heatmap x values: {heatmap_data.x_values}")
     print(f"Heatmap y values: {heatmap_data.y_values}")
     print(f"Missing heatmap cells: {np.isnan(heatmap_data.values).sum()}")
+
+    rendered_heatmap = render_heatmap(heatmap_data)
+    plot_window = tk.Toplevel(root)
+    plot_window.title("Grip Heatmap")
+    canvas = FigureCanvasTkAgg(rendered_heatmap, master=plot_window)
+    canvas.draw()
+    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    plot_window.protocol("WM_DELETE_WINDOW", plot_window.destroy)
+    plot_window.mainloop()
 finally:
     root.destroy()

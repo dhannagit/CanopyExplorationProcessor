@@ -126,6 +126,28 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Add the Matplotlib rendering layer that consumes these plot-data objects, then connect rendering and export settings to the saved analysis configuration.
 
+## 2026-08-26 - Align heatmap rendering with MATLAB output
+
+**Goal:** Make generated heatmaps readable and visually consistent with the existing MATLAB plots.
+
+**Changed:** Updated `plotting.py` so heatmap cells use midpoint-derived outer edges while ticks remain at the actual sweep-value centers. Added explicit x/y ticks, white cell-value annotations, and the `jet` colormap. Also corrected scatter plots so labels and titles are applied in both line and scatter modes.
+
+**Evidence:** Renderer tests assert coordinate ticks, `jet` colormap selection, and annotation count. Full test suite passes with 44 tests.
+
+**Next:** Connect renderer output to saved plot/export settings and begin the desktop GUI layer.
+
+## 2026-08-26 - Add Matplotlib renderer
+
+**Goal:** Render the prepared plot-data objects without coupling analysis or plot-data preparation to Matplotlib or the GUI.
+
+**Changed:** Added `src/canopy_processor/plotting.py` with renderers for line/scatter plots, 2D heatmaps, faceted heatmaps, and parallel-coordinate plots, plus `render_plot_data` dispatch. Renderers return Matplotlib `Figure` objects so callers can display or export them. Added headless renderer tests and made Matplotlib a core project dependency.
+
+**Decisions:** Keep rendering separate from plot-data preparation. Tests use the `Agg` backend and inspect figure/axis structure rather than pixel output. Heatmaps use lower-origin orientation and handle single-level axes without warnings.
+
+**Evidence:** Full test suite passes with 44 tests and no editor diagnostics in the renderer or tests.
+
+**Next:** Connect rendering and export settings to the saved analysis configuration, then begin the desktop GUI layer.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

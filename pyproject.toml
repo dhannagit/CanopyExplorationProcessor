@@ -12,10 +12,11 @@ dependencies = [
     "scipy>=1.14",
     "pandas>=2.2",
     "openpyxl>=3.1",
+    "matplotlib>=3.9",
 ]
 
 [project.optional-dependencies]
-gui = ["PySide6>=6.8", "matplotlib>=3.9"]
+gui = ["PySide6>=6.8"]
 test = ["pytest>=8"]
 
 [tool.pytest.ini_options]

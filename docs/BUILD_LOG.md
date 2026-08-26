@@ -114,6 +114,18 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Wire `find_missing_runs`/`build_grid` into a playground example alongside the baseline comparison, then start the plot-data builder that consumes `GridResult`.
 
+## 2026-08-25 - Add renderer-independent plot-data builders
+
+**Goal:** Convert deduplicated sweep results into arrays and labels that future plotting code can render.
+
+**Changed:** Added `src/canopy_processor/plot_data.py` with `LinePlotData`, `HeatmapPlotData`, `FacetedHeatmapData`, `ParallelCoordinatesData`, and builders for line/scatter, 2D heatmap, N-D faceted heatmap, and parallel-coordinate data. Added `build_plot_data` as the plot-type dispatcher and focused synthetic tests.
+
+**Decisions:** Keep this layer independent of Matplotlib and the GUI. Line data is sorted by x; heatmaps use y rows and x columns, with missing coordinate pairs represented by NaN; remaining dimensions become facet keys; parallel-coordinate values are emitted as a rectangular matrix. Rendering and visual styling remain a later concern.
+
+**Evidence:** Full test suite passes with 39 tests and no editor diagnostics in the new module or tests.
+
+**Next:** Add the Matplotlib rendering layer that consumes these plot-data objects, then connect rendering and export settings to the saved analysis configuration.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

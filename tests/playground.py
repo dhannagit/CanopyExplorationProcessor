@@ -26,7 +26,9 @@ from canopy_processor import (
     analyze_metric,
     join_sweep_variables,
     resolve_baseline_laps,
-    compare_rows_to_baseline
+    compare_rows_to_baseline,
+    build_grid,
+    build_heatmap_data,
 )
 
 
@@ -238,5 +240,25 @@ try:
             f"{row.metric_result.value:.4f} "
             f"{comparison.delta_mode} difference = {comparison.delta:.4f}"
         )
+
+    grid = build_grid(
+        rows,
+        variable_paths=(
+            "car.tyres.front.INITIAL_CONDITIONS.InfPress",
+            "car.tyres.rear.INITIAL_CONDITIONS.InfPress",
+        ),
+    )
+    heatmap_data = build_heatmap_data(
+        grid.points,
+        x_variable="car.tyres.rear.INITIAL_CONDITIONS.InfPress",
+        y_variable="car.tyres.front.INITIAL_CONDITIONS.InfPress",
+    )
+    print(
+        f"\nHeatmap: x={heatmap_data.x_variable}, "
+        f"y={heatmap_data.y_variable}, shape={heatmap_data.values.shape}"
+    )
+    print(f"Heatmap x values: {heatmap_data.x_values}")
+    print(f"Heatmap y values: {heatmap_data.y_values}")
+    print(f"Missing heatmap cells: {np.isnan(heatmap_data.values).sum()}")
 finally:
     root.destroy()

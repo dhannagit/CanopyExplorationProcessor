@@ -13,7 +13,7 @@ BASELINE_MODES = {"none", "loaded_run", "external_study"}
 DELTA_MODES = {"none", "absolute", "percent"}
 AXIS_ROLES = {"x", "y", "facet", "color", "unused"}
 MASK_OPERATORS = {"and", "or"}
-EXPORT_FORMATS = {"svg", "png", "csv", "json"}
+EXPORT_FORMATS = {"svg", "png"}
 
 
 @dataclass
@@ -119,8 +119,7 @@ class ExportConfig:
 	"""Output preferences stored with the analysis for reproducibility."""
 
 	output_directory: Path | None = None
-	formats: tuple[str, ...] = ("svg", "png", "csv", "json")
-	include_configuration: bool = True
+	formats: tuple[str, ...] = ("svg", "png")
 
 	def __post_init__(self) -> None:
 		unknown_formats = set(self.formats) - EXPORT_FORMATS

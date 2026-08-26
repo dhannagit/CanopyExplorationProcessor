@@ -126,15 +126,6 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Add the Matplotlib rendering layer that consumes these plot-data objects, then connect rendering and export settings to the saved analysis configuration.
 
-## 2026-08-26 - Align heatmap rendering with MATLAB output
-
-**Goal:** Make generated heatmaps readable and visually consistent with the existing MATLAB plots.
-
-**Changed:** Updated `plotting.py` so heatmap cells use midpoint-derived outer edges while ticks remain at the actual sweep-value centers. Added explicit x/y ticks, white cell-value annotations, and the `jet` colormap. Also corrected scatter plots so labels and titles are applied in both line and scatter modes.
-
-**Evidence:** Renderer tests assert coordinate ticks, `jet` colormap selection, and annotation count. Full test suite passes with 44 tests.
-
-**Next:** Connect renderer output to saved plot/export settings and begin the desktop GUI layer.
 
 ## 2026-08-26 - Add Matplotlib renderer
 
@@ -147,6 +138,28 @@ This is the chronological engineering record for the Python migration. Keep entr
 **Evidence:** Full test suite passes with 44 tests and no editor diagnostics in the renderer or tests.
 
 **Next:** Connect rendering and export settings to the saved analysis configuration, then begin the desktop GUI layer.
+
+## 2026-08-26 - Align heatmap rendering with MATLAB output
+
+**Goal:** Make generated heatmaps readable and visually consistent with the existing MATLAB plots.
+
+**Changed:** Updated `plotting.py` so heatmap cells use midpoint-derived outer edges while ticks remain at the actual sweep-value centers. Added explicit x/y ticks, white cell-value annotations, and the `jet` colormap. Also corrected scatter plots so labels and titles are applied in both line and scatter modes.
+
+**Evidence:** Renderer tests assert coordinate ticks, `jet` colormap selection, and annotation count. Full test suite passes with 44 tests.
+
+**Next:** Connect renderer output to saved plot/export settings and begin the desktop GUI layer.
+
+## 2026-08-26 - Connect rendering and export configuration
+
+**Goal:** Make saved export settings control the files produced from a rendered figure and its analysis rows.
+
+**Changed:** Added `export_analysis` in `src/canopy_processor/exporting.py`. It reads `ExportConfig`, creates the configured output directory, and exports SVG/PNG figures. Analysis configuration remains available separately through `AnalysisConfig.save()`. Updated `tests/playground.py` to prompt for an export directory, store it in `ExportConfig`, and export the displayed grip heatmap.
+
+**Decisions:** Keep exporting separate from rendering. The same returned Matplotlib `Figure` is used for display and SVG/PNG file output. Saved configuration JSON remains separate from result-file export.
+
+**Evidence:** Export tests verify all configured formats and serialized rows. Full test suite passes with 46 tests; playground compiles successfully.
+
+**Next:** Begin the desktop GUI layer around the tested loading, configuration, analysis, plotting, and export APIs.
 
 ## Logging Checklist
 

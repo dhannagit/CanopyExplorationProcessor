@@ -25,6 +25,7 @@ from .exploration import (
 	load_job_records,
 	load_exploration_definition,
 )
+from .exporting import export_analysis
 from .metric import Metric, average_metric, default_metrics, evaluate_metric, source_metric
 from .plot_data import (
 	FacetedHeatmapData,
@@ -108,6 +109,7 @@ __all__ = [
 	"compute_delta",
 	"discover_job_variables",
 	"evaluate_metric",
+	"export_analysis",
 	"find_missing_runs",
 	"join_sweep_variables",
 	"load_job_records",

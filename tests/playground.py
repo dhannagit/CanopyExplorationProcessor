@@ -11,6 +11,7 @@ from canopy_processor import (
     AnalysisConfig,
     DatasetConfig,
     BaselineConfig,
+    ExportConfig,
     PlotConfig,
     SweepVariableConfig,
     FilterConfig,
@@ -30,6 +31,7 @@ from canopy_processor import (
     compare_rows_to_baseline,
     build_grid,
     build_heatmap_data,
+    export_analysis,
     render_line,
     render_parallel_coordinates,
     render_heatmap,
@@ -177,6 +179,13 @@ try:
     if not lap_indices:
         raise RuntimeError("No baseline laps selected.")
 
+    output_directory = filedialog.askdirectory(
+        parent=root,
+        title="Select the analysis export directory",
+    )
+    if not output_directory:
+        raise RuntimeError("No analysis export directory selected.")
+
     config = AnalysisConfig(
         dataset=DatasetConfig(
             dxpx_directory=Path(dxpx_directory),
@@ -188,6 +197,9 @@ try:
             external_path=Path(baseline_file),
             lap_indices=lap_indices,
             delta_mode="absolute"
+        ),
+        export=ExportConfig(
+            output_directory=Path(output_directory),
         ),
         sweep_variables=[
             SweepVariableConfig(
@@ -273,6 +285,13 @@ try:
     canvas.draw()
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
     plot_window.protocol("WM_DELETE_WINDOW", plot_window.destroy)
-    plot_window.mainloop()
+    exported_paths = export_analysis(
+        rendered_heatmap,
+        config,
+        filename="grip_heatmap",
+    )
+    for exported_path in exported_paths:
+        print(f"Exported: {exported_path}")
+    root.wait_window(plot_window)
 finally:
     root.destroy()

@@ -33,6 +33,7 @@ class AnalysisSession:
 	state: SessionState = SessionState.EMPTY
 	config: AnalysisConfig = field(default_factory=AnalysisConfig)
 	discovered_variables: tuple[Any, ...] = ()
+	discovery_result: Any = None
 	diagnostics: list[str] = field(default_factory=list)
 	progress_stage: str | None = None
 	progress_value: int = 0
@@ -51,13 +52,15 @@ class AnalysisSession:
 
 		self.state = SessionState.DISCOVERING
 		self.discovered_variables = ()
+		self.discovery_result = None
 		self.diagnostics.clear()
 		self.last_error = None
 
-	def finish_discovery(self, variables: tuple[Any, ...], diagnostics: list[str] | None = None) -> None:
+	def finish_discovery(self, variables: tuple[Any, ...], diagnostics: list[str] | None = None, result: Any = None) -> None:
 		"""Publish discovered candidates and require user review."""
 
 		self.discovered_variables = variables
+		self.discovery_result = result
 		self.diagnostics = list(diagnostics or [])
 		self.state = SessionState.REVIEW_REQUIRED
 

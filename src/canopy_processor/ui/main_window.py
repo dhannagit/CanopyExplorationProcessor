@@ -24,7 +24,10 @@ from PySide6.QtWidgets import (
 	QWidget,
 )
 
+from ..config import DatasetConfig
+from .discovery import DiscoveryResult, discover_dataset
 from .session import AnalysisSession, SessionState
+from .worker import CancellationToken, Worker, start_worker
 
 
 STYLE = """
@@ -48,6 +51,8 @@ class MainWindow(QMainWindow):
 	def __init__(self) -> None:
 		super().__init__()
 		self.session = AnalysisSession()
+		self._thread = None
+		self._worker: Worker | None = None
 		self.setWindowTitle("Canopy Exploration Processor")
 		self.resize(1400, 850)
 		self.setStyleSheet(STYLE)
@@ -90,6 +95,10 @@ class MainWindow(QMainWindow):
 		self.variable_list = QListWidget()
 		self.variable_list.addItem("Review discovered variables after loading")
 		variables_layout.addWidget(self.variable_list)
+		self.confirm_button = QPushButton("Confirm variables")
+		self.confirm_button.setEnabled(False)
+		self.confirm_button.clicked.connect(self._confirm_variables)
+		variables_layout.addWidget(self.confirm_button)
 		layout.addWidget(variables)
 
 		analysis = QGroupBox("Analysis")
@@ -154,8 +163,79 @@ class MainWindow(QMainWindow):
 		if path:
 			self.root_label.setText(path)
 			self.session.begin_discovery()
-			self.status_label.setText("Review discovered variables before analysis")
-			self.session.state = SessionState.REVIEW_REQUIRED
+			self.variable_list.clear()
+			self.variable_list.addItem("Discovering source data...")
+			self.confirm_button.setEnabled(False)
+			self.status_label.setText("Discovering source data...")
+			self._start_discovery(path)
+
+	def _start_discovery(self, path: str) -> None:
+		def operation(token: CancellationToken, progress: object) -> DiscoveryResult:
+			progress("Scanning source folders", 1, 2)
+			if token.cancelled:
+				return None
+			result = discover_dataset(path)
+			progress("Reading sweep metadata", 2, 2)
+			return result
+
+		self._thread, self._worker = start_worker(operation)
+		self._worker.progress.connect(self._show_progress)
+		self._worker.result_ready.connect(self._discovery_succeeded)
+		self._worker.failed.connect(self._operation_failed)
+		self._worker.cancelled.connect(self._operation_cancelled)
+		self._worker.finished.connect(self._worker_finished)
+		self.progress.setRange(0, 2)
+		self.progress.setValue(0)
+		self.progress.setVisible(True)
+		self.cancel_button.setVisible(True)
+
+	def _show_progress(self, stage: str, value: int, total: int) -> None:
+		self.session.update_progress(stage, value, total)
+		self.status_label.setText(stage)
+		self.progress.setRange(0, total)
+		self.progress.setValue(value)
+
+	def _discovery_succeeded(self, result: DiscoveryResult) -> None:
+		self.session.finish_discovery(result.variables, list(result.diagnostics), result)
+		self.variable_list.clear()
+		for variable in result.variables:
+			units = f" [{variable.units}]" if variable.units else ""
+			self.variable_list.addItem(f"{variable.path}{units} ({len(variable.values)} values)")
+		if not result.variables:
+			self.variable_list.addItem("No numeric sweep variables found")
+		self.confirm_button.setEnabled(bool(result.variables) and result.dxpx_directory is not None and result.raw_directory is not None)
+		self.status_label.setText(self._discovery_status(result))
+
+	def _discovery_status(self, result: DiscoveryResult) -> str:
+		if result.diagnostics:
+			return f"Discovery complete with {len(result.diagnostics)} diagnostic(s)"
+		return f"Discovered {len(result.variables)} sweep variable(s); review and confirm"
+
+	def _confirm_variables(self) -> None:
+		result = self.session.discovery_result
+		if not isinstance(result, DiscoveryResult) or result.dxpx_directory is None or result.raw_directory is None:
+			return
+		self.session.config.dataset = DatasetConfig(
+			dxpx_directory=result.dxpx_directory,
+			raw_directory=result.raw_directory,
+			circuit_workbook=result.circuit_workbook,
+		)
+		self.session.mark_ready()
+		self.confirm_button.setEnabled(False)
+		self.status_label.setText("Configuration ready; choose analysis settings and apply")
+
+	def _operation_failed(self, message: str) -> None:
+		self.session.fail(message)
+		self.status_label.setText(f"Operation failed: {message}")
+
+	def _operation_cancelled(self) -> None:
+		self.status_label.setText("Operation cancelled; previous results are preserved")
+
+	def _worker_finished(self) -> None:
+		self.progress.setVisible(False)
+		self.cancel_button.setVisible(False)
+		self._worker = None
+		self._thread = None
 
 	def _begin_analysis(self) -> None:
 		if self.session.state not in {SessionState.READY, SessionState.RESULTS_AVAILABLE}:
@@ -167,7 +247,7 @@ class MainWindow(QMainWindow):
 		self.status_label.setText("Analysis queued")
 
 	def _cancel_analysis(self) -> None:
+		if self._worker is not None:
+			self._worker.request_cancel()
 		self.session.request_cancel()
-		self.progress.setVisible(False)
-		self.cancel_button.setVisible(False)
-		self.status_label.setText("Cancellation requested; previous results are preserved")
+		self.status_label.setText("Cancellation requested; finishing current operation")

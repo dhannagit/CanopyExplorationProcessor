@@ -173,6 +173,18 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Connect dataset discovery and analysis to background Qt workers with stage progress, cancellation, error handling, and last-valid-result preservation, then bind the discovered variables and real analysis controls to the workbench.
 
+## 2026-08-27 - Add background discovery workflow
+
+**Goal:** Make dataset discovery real and non-blocking in the desktop workbench, with a reusable cancellation and progress contract for future analysis operations.
+
+**Changed:** Added `src/canopy_processor/ui/worker.py` with cooperative cancellation tokens, Qt worker signals, and thread startup helpers. Extended `AnalysisSession` to retain the `DiscoveryResult`. Connected root-folder selection in `main_window.py` to background discovery, populated the sweep-variable list from the actual sample data, surfaced discovery diagnostics, added explicit variable confirmation, and stored resolved dataset paths in `DatasetConfig`. Added worker lifecycle tests and a window test for real variable population.
+
+**Decisions:** Keep blocking domain calls outside the Qt UI thread. Attach observers before starting workers so fast operations cannot lose signals. Cancellation is cooperative and preserves prior results. A selected root may contain nested exploration directories; discovery resolves the actual metadata-bearing directory before loading variables.
+
+**Evidence:** Focused GUI tests pass with 5 tests, covering worker completion, cancellation, nested sample discovery, and Qt workbench integration. Full test suite passes with 54 tests. The sample repository root resolves its nested `DATA_Raw/MOS_COR_TyrePressureExploration` source and discovers the two pressure variables.
+
+**Next:** Connect confirmed dataset state to the real load, turn-zone, metric-reduction, baseline, plot-data, and Matplotlib rendering pipeline through staged background analysis workers, then bind result plots and diagnostics to the workbench.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

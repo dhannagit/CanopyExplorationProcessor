@@ -185,6 +185,30 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Connect confirmed dataset state to the real load, turn-zone, metric-reduction, baseline, plot-data, and Matplotlib rendering pipeline through staged background analysis workers, then bind result plots and diagnostics to the workbench.
 
+## 2026-08-27 - Correct sweep-variable selection behavior
+
+**Goal:** Ensure the GUI's sweep-variable selection matches its intended multi-dimensional analysis workflow.
+
+**Changed:** Updated `main_window.py` so the discovered-variable list uses Qt extended multi-selection. Confirmation now reads only the selected rows and stores those candidates as `SweepVariableConfig` entries; no selection is rejected instead of implicitly accepting every discovered variable. Added GUI tests covering both single-variable and multi-variable confirmation.
+
+**Decisions:** Keep axis-role assignment as a follow-up control, but establish an explicit selection contract first. This prevents the GUI from presenting a single-selection affordance while silently configuring all candidates.
+
+**Evidence:** Focused GUI tests pass with 3 tests, including real sample discovery, single-variable exclusion, and selecting both pressure variables. The editor reports no diagnostics in the changed files.
+
+**Next:** Add per-variable axis-role controls and connect the confirmed configuration to staged background loading, reduction, plotting, and diagnostics.
+
+## 2026-08-27 - Stabilize variable selection and worker cleanup
+
+**Goal:** Make multi-variable selection explicit and keep repeated GUI discovery operations stable.
+
+**Changed:** Updated `main_window.py` to use Qt extended multi-selection and persist only selected candidates as `SweepVariableConfig` entries. Added explicit rejection of an empty selection. Moved worker cleanup to `QThread.finished` and added close-event cancellation/wait handling to prevent active threads from outliving the window. Expanded GUI tests for single selection, selecting both pressure variables, and repeated Qt worker lifecycle behavior.
+
+**Decisions:** Selecting one variable configures one variable; selecting several configures several; discovery results are never implicitly treated as the user's selection. Axis-role assignment remains the next configuration control. Worker shutdown is considered complete only after the thread finishes, not merely when the worker emits its completion signal.
+
+**Evidence:** Focused GUI tests pass with 5 tests. Full test suite passes with 55 tests. The isolated Qt window suite passes without the access violation previously observed during worker cleanup.
+
+**Next:** Add per-variable axis-role controls, then connect the confirmed configuration to staged background loading, reduction, plotting, and diagnostics.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

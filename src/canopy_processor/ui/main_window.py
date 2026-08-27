@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
 	QCheckBox,
 	QComboBox,
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import (
 	QWidget,
 )
 
-from ..config import DatasetConfig
+from ..config import DatasetConfig, SweepVariableConfig
 from .discovery import DiscoveryResult, discover_dataset
 from .session import AnalysisSession, SessionState
 from .worker import CancellationToken, Worker, start_worker
@@ -93,6 +94,7 @@ class MainWindow(QMainWindow):
 		variables = QGroupBox("Sweep variables")
 		variables_layout = QVBoxLayout(variables)
 		self.variable_list = QListWidget()
+		self.variable_list.setSelectionMode(QListWidget.ExtendedSelection)
 		self.variable_list.addItem("Review discovered variables after loading")
 		variables_layout.addWidget(self.variable_list)
 		self.confirm_button = QPushButton("Confirm variables")
@@ -183,7 +185,7 @@ class MainWindow(QMainWindow):
 		self._worker.result_ready.connect(self._discovery_succeeded)
 		self._worker.failed.connect(self._operation_failed)
 		self._worker.cancelled.connect(self._operation_cancelled)
-		self._worker.finished.connect(self._worker_finished)
+		self._thread.finished.connect(self._worker_finished)
 		self.progress.setRange(0, 2)
 		self.progress.setValue(0)
 		self.progress.setVisible(True)
@@ -215,11 +217,22 @@ class MainWindow(QMainWindow):
 		result = self.session.discovery_result
 		if not isinstance(result, DiscoveryResult) or result.dxpx_directory is None or result.raw_directory is None:
 			return
+		selected_rows = sorted({self.variable_list.row(item) for item in self.variable_list.selectedItems()})
+		if not selected_rows:
+			self.status_label.setText("Select at least one sweep variable")
+			return
 		self.session.config.dataset = DatasetConfig(
 			dxpx_directory=result.dxpx_directory,
 			raw_directory=result.raw_directory,
 			circuit_workbook=result.circuit_workbook,
 		)
+		self.session.config.sweep_variables = [
+			SweepVariableConfig(
+				path=result.variables[row].path,
+				units=result.variables[row].units,
+			)
+			for row in selected_rows
+		]
 		self.session.mark_ready()
 		self.confirm_button.setEnabled(False)
 		self.status_label.setText("Configuration ready; choose analysis settings and apply")
@@ -236,6 +249,15 @@ class MainWindow(QMainWindow):
 		self.cancel_button.setVisible(False)
 		self._worker = None
 		self._thread = None
+
+	def closeEvent(self, event: QCloseEvent) -> None:
+		"""Stop an active operation before the window and its Qt objects close."""
+
+		if self._worker is not None and self._thread is not None:
+			self._worker.request_cancel()
+			self._thread.quit()
+			self._thread.wait(2000)
+		event.accept()
 
 	def _begin_analysis(self) -> None:
 		if self.session.state not in {SessionState.READY, SessionState.RESULTS_AVAILABLE}:

@@ -1,0 +1,2 @@
+[console_scripts]
+canopy-exploration-gui = canopy_processor.ui.app:main

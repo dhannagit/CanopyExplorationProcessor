@@ -161,6 +161,18 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Begin the desktop GUI layer around the tested loading, configuration, analysis, plotting, and export APIs.
 
+## 2026-08-27 - Add initial desktop GUI workbench
+
+**Goal:** Create the first visible PySide6 desktop shell so the planned GUI layout and visual direction can be reviewed before implementing the full analysis workflow.
+
+**Changed:** Added `src/canopy_processor/ui/session.py` with a framework-independent `AnalysisSession` lifecycle model covering discovery, review, ready, analysis, cancellation, results, and failure states while preserving the last valid result. Added `src/canopy_processor/ui/discovery.py` to resolve nested Canopy source folders, prefer exploration metadata, fall back to job-document variables, and return diagnostics. Added `src/canopy_processor/ui/main_window.py` with the initial dark graphite/cyan workbench: left control rail, dataset selection, sweep-variable area, metric/plot/baseline controls, Results and Comparison tabs, and persistent diagnostics/progress controls. Added `src/canopy_processor/ui/app.py` and the `canopy-exploration-gui` project script entry point.
+
+**Decisions:** Keep the session and discovery contracts independent of Qt so the numerical and state behavior remains testable without constructing widgets. Treat the selected repository root as a container that may hold nested exploration directories. Keep the first shell intentionally non-destructive: selecting a root enters review state, while analysis controls report that the worker workflow is not connected yet.
+
+**Evidence:** The GUI can be launched with `python -m canopy_processor.ui.app` from the activated project virtual environment. The workbench was manually opened and reviewed. Added session, discovery, and offscreen Qt smoke tests. Full test suite passes with 51 tests; focused GUI tests pass with 5 tests.
+
+**Next:** Connect dataset discovery and analysis to background Qt workers with stage progress, cancellation, error handling, and last-valid-result preservation, then bind the discovered variables and real analysis controls to the workbench.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

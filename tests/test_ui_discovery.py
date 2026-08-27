@@ -5,6 +5,7 @@ from canopy_processor.ui import discover_dataset
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
 SAMPLE_RAW_STUDY = REPOSITORY_ROOT / "DATA_Raw" / "MOS_COR_TyrePressureExploration"
+TRACK_TEMP_STUDY = REPOSITORY_ROOT / "DATA_Raw" / "MOS_COR_TrackTempSweep"
 
 
 def test_discover_dataset_finds_sample_sources() -> None:
@@ -36,3 +37,14 @@ def test_discover_dataset_matches_worksheet_study_layout(tmp_path: Path) -> None
 	assert result.raw_directory == raw
 	assert result.dxpx_directory == dxpx
 	assert result.dxpx_candidates == (dxpx,)
+
+
+def test_discover_track_temperature_variables() -> None:
+	result = discover_dataset(TRACK_TEMP_STUDY)
+
+	assert result.exploration is not None
+	assert result.exploration.design_name == "Star"
+	assert len(result.variables) == 8
+	assert result.variables[0].path == "track.TTrack"
+	assert result.variables[0].values[:6] == (25.0, 30.0, 35.0, 40.0, 45.0, 50.0)
+	assert not any("No numeric sweep variables" in item for item in result.diagnostics)

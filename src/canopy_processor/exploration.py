@@ -67,7 +67,7 @@ def load_exploration_definition(raw_directory: str | Path) -> ExplorationDefinit
         variables.append(SweepVariable(path=path, units=row.get("units") or None, values=values))
 
     coordinates = tuple(
-        tuple(float(_unwrap_coordinate(value)) for value in coordinate)
+        tuple(float(value) for value in _coordinate_values(coordinate))
         for coordinate in exploration_map.get("coordinates", [])
     )
     return ExplorationDefinition(
@@ -145,3 +145,14 @@ def _unwrap_coordinate(value: Any) -> Any:
     while isinstance(value, list) and len(value) == 1:
         value = value[0]
     return value
+
+
+def _coordinate_values(value: Any) -> list[Any]:
+    """Flatten wrapper arrays around one star or factorial coordinate."""
+
+    if not isinstance(value, list):
+        return [value]
+    values: list[Any] = []
+    for item in value:
+        values.extend(_coordinate_values(item))
+    return values

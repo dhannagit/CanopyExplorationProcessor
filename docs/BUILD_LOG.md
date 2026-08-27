@@ -281,6 +281,18 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Add metric/filter/reduction controls and connect the loaded runs to joined sweep results, grid diagnostics, plot-data generation, and Matplotlib rendering.
 
+## 2026-08-27 - Support star exploration metadata
+
+**Goal:** Restore numeric sweep-variable discovery for the newly added `MOS_COR_TrackTempSweep` star exploration.
+
+**Root cause:** `exploration-map.json` for the star study stores coordinates as nested arrays such as `[[[25.0, 20.0, ...]]]`, while the factorial sample uses a different nesting depth. `_unwrap_coordinate()` removed only one-element list wrappers, leaving inner lists and causing `float(list)` to fail. The GUI caught that metadata error and displayed no variables even though the raw job documents contained all numeric changes.
+
+**Changed:** Updated `exploration.py` to recursively flatten coordinate arrays before converting values to floats. Added real TrackTemp tests for the `Star` design, eight numeric variables, and six coordinates, plus GUI discovery coverage for `track.TTrack` and its six values.
+
+**Evidence:** Direct fallback inspection showed eight numeric changed paths in the TrackTemp job documents. After the parser fix, both factorial pressure and star TrackTemp discovery pass. Full test suite passes with 61 tests and no editor diagnostics in the changed files.
+
+**Next:** Add metric/filter/reduction controls and connect the loaded runs to joined sweep results, grid diagnostics, plot-data generation, and Matplotlib rendering.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

@@ -4,6 +4,7 @@ from canopy_processor import discover_job_variables, load_exploration_definition
 
 
 RAW_DIRECTORY = Path(__file__).parents[1] / "DATA_Raw" / "MOS_COR_TyrePressureExploration"
+TRACK_TEMP_DIRECTORY = Path(__file__).parents[1] / "DATA_Raw" / "MOS_COR_TrackTempSweep"
 
 
 def test_load_canopy_exploration_metadata() -> None:
@@ -14,6 +15,15 @@ def test_load_canopy_exploration_metadata() -> None:
     assert definition.variables[0].path.endswith("front.INITIAL_CONDITIONS.InfPress")
     assert definition.variables[0].values == (1.8, 1.85, 1.9, 1.95, 2.0, 1.8, 1.85, 1.9, 1.95, 2.0, 1.8, 1.85, 1.9, 1.95, 2.0, 1.8, 1.85, 1.9, 1.95, 2.0, 1.8, 1.85, 1.9, 1.95, 2.0)
     assert len(definition.coordinates) == 25
+
+
+def test_load_star_exploration_metadata() -> None:
+    definition = load_exploration_definition(TRACK_TEMP_DIRECTORY)
+
+    assert definition.design_name == "Star"
+    assert len(definition.variables) == 8
+    assert definition.coordinates[0] == (25.0, 20.0, 108.4, 108.4, 88.4, 113.8, 113.8, 93.8)
+    assert len(definition.coordinates) == 6
 
 
 def test_discover_variables_from_job_documents() -> None:

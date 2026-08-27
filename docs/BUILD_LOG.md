@@ -269,6 +269,18 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Add metric/filter/reduction controls and connect the loaded runs to joined sweep results, grid diagnostics, plot-data generation, and Matplotlib rendering.
 
+## 2026-08-27 - Verify DXPX override and raw-study refresh
+
+**Goal:** Confirm that manual DXPX changes affect the actual loading call and that changing the raw study re-runs variable discovery.
+
+**Changed:** Added GUI regression tests around the existing path flow. The manual override test replaces `DiscoveryResult.dxpx_directory`, starts the loading stage, and captures the `DiscoveryResult` received by `load_dataset()`. The raw-study refresh test submits two distinct discovery paths and verifies that the second result replaces both the stored discovery result and discovered sweep variables.
+
+**Decisions:** Keep manual DXPX selection scoped to the current raw study; changing the raw study remains the operation that resets and rediscoveries the complete source configuration. No stale variables are retained across raw-study selections.
+
+**Evidence:** Full test suite passes with 59 tests. The override reaches the loading boundary with the manually selected path unchanged, and sequential raw-study discovery publishes the second study's variables.
+
+**Next:** Add metric/filter/reduction controls and connect the loaded runs to joined sweep results, grid diagnostics, plot-data generation, and Matplotlib rendering.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -6,6 +7,9 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QEventLoop, QTimer
 
 from canopy_processor.ui.main_window import MainWindow
+from canopy_processor.ui.pipeline import LoadedDataset
+from canopy_processor.ui.discovery import DiscoveryResult
+from canopy_processor import SweepVariable
 
 
 REPOSITORY_ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -88,6 +92,79 @@ def test_main_window_persists_multiple_selected_variables() -> None:
 	assert window.session.loaded_dataset is not None
 	assert len(window.session.loaded_dataset.runs) == 25
 	assert window.metric_combo.count() > 1
+
+	window.close()
+	application.processEvents()
+
+
+def test_manual_dxpx_override_is_used_for_loading(monkeypatch) -> None:
+	application = QApplication.instance() or QApplication([])
+	window = MainWindow()
+	window._start_discovery(SAMPLE_RAW_STUDY)
+	loop = QEventLoop()
+	thread = window._thread
+	assert thread is not None
+	thread.finished.connect(loop.quit)
+	QTimer.singleShot(5000, loop.quit)
+	loop.exec()
+	application.processEvents()
+
+	override = Path(SAMPLE_RAW_STUDY).parent.parent / "manual-dxpx-study"
+	result = window.session.discovery_result
+	assert result is not None
+	window.session.discovery_result = result.__class__(
+		root=result.root,
+		dxpx_directory=override,
+		raw_directory=result.raw_directory,
+		circuit_workbook=result.circuit_workbook,
+		variables=result.variables,
+		exploration=result.exploration,
+		diagnostics=result.diagnostics,
+		dxpx_candidates=result.dxpx_candidates,
+	)
+	window.variable_list.selectRow(0)
+	captured = []
+	monkeypatch.setattr(
+		"canopy_processor.ui.main_window.load_dataset",
+		lambda discovery, *args: captured.append(discovery) or LoadedDataset((), {}, ()),
+	)
+	window._start_loading(window.session.discovery_result)
+	loop = QEventLoop()
+	thread = window._thread
+	assert thread is not None
+	thread.finished.connect(loop.quit)
+	QTimer.singleShot(5000, loop.quit)
+	loop.exec()
+
+	assert captured and captured[0].dxpx_directory == override
+	window.close()
+	application.processEvents()
+
+
+def test_new_raw_study_selection_rediscoveries_variables(monkeypatch, tmp_path: Path) -> None:
+	application = QApplication.instance() or QApplication([])
+	window = MainWindow()
+	first = tmp_path / "StudyA"
+	second = tmp_path / "StudyB"
+	first_variable = SweepVariable("setup.first", "bar", (1.0,))
+	second_variable = SweepVariable("setup.second", "deg", (2.0,))
+
+	def fake_discovery(path: str) -> DiscoveryResult:
+		variable = first_variable if Path(path) == first else second_variable
+		return DiscoveryResult(Path(path), Path(path) / "dxpx", Path(path), None, (variable,), None, ())
+
+	monkeypatch.setattr("canopy_processor.ui.main_window.discover_dataset", fake_discovery)
+	for path, expected in ((first, first_variable), (second, second_variable)):
+		window._start_discovery(str(path))
+		loop = QEventLoop()
+		thread = window._thread
+		assert thread is not None
+		thread.finished.connect(loop.quit)
+		QTimer.singleShot(5000, loop.quit)
+		loop.exec()
+		application.processEvents()
+		assert window.session.discovery_result.root == path.resolve()
+		assert window.session.discovered_variables == (expected,)
 
 	window.close()
 	application.processEvents()

@@ -55,6 +55,8 @@ def test_main_window_populates_discovered_variables() -> None:
 		window.session.discovered_variables[0].path
 	]
 	assert window.session.config.sweep_variables[0].role == "x"
+	window.variable_list.cellWidget(0, 1).setCurrentText("y")
+	assert window.session.config.sweep_variables[0].role == "y"
 
 	window.close()
 	application.processEvents()
@@ -75,8 +77,6 @@ def test_main_window_persists_multiple_selected_variables() -> None:
 	application.processEvents()
 
 	window.variable_list.selectAll()
-	window.variable_list.cellWidget(0, 1).setCurrentText("x")
-	window.variable_list.cellWidget(1, 1).setCurrentText("y")
 	window._confirm_variables()
 	loop = QEventLoop()
 	loading_thread = window._thread
@@ -92,6 +92,31 @@ def test_main_window_persists_multiple_selected_variables() -> None:
 	assert window.session.loaded_dataset is not None
 	assert len(window.session.loaded_dataset.runs) == 25
 	assert window.metric_combo.count() > 1
+	window.variable_list.cellWidget(0, 1).setCurrentText("x")
+	window.variable_list.cellWidget(1, 1).setCurrentText("y")
+	assert window.phase_list.count() > 0
+	assert window.zone_list.count() > 0
+	window.phase_list.item(0).setSelected(True)
+	window.zone_list.item(0).setSelected(True)
+	window.phase_operator.setCurrentText("or")
+	window.zone_operator.setCurrentText("or")
+	window.category_operator.setCurrentText("and")
+	window.session.config.sweep_variables = [window.session.config.sweep_variables[0]]
+	window.metric_combo.setCurrentIndex(window.metric_combo.findData("gCarPotential"))
+	window._begin_analysis()
+	loop = QEventLoop()
+	analysis_thread = window._thread
+	assert analysis_thread is not None
+	analysis_thread.finished.connect(loop.quit)
+	QTimer.singleShot(15000, loop.quit)
+	loop.exec()
+	application.processEvents()
+	assert window.session.result is not None
+	assert {variable.role for variable in window.session.config.sweep_variables} == {"x", "y"}
+	assert window.session.config.filters.phases
+	assert window.session.config.filters.turn_zones
+	assert window.results_table.rowCount() == 25
+	assert len(window.figure_canvas.figure.axes) >= 1
 
 	window.close()
 	application.processEvents()

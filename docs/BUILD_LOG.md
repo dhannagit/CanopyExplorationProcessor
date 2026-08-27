@@ -293,6 +293,44 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Add metric/filter/reduction controls and connect the loaded runs to joined sweep results, grid diagnostics, plot-data generation, and Matplotlib rendering.
 
+## 2026-08-27 - Connect first real analysis results to the GUI
+
+**Goal:** Move the workbench from loaded data to an actual reduced analysis, rendered plot, and inspectable result table.
+
+**Changed:** Added `analyze_loaded_dataset()` and `AnalysisOutput` in `ui/pipeline.py`. The operation applies the selected metric and current filters, joins reduced values to discovered sweep coordinates, builds the sparse/duplicate-aware grid, and creates renderer-independent plot data. Connected `Apply / Analyze` in `main_window.py` to a background worker, with suggested plot selection based on assigned roles. Added a Matplotlib Qt canvas and populated result table; the initial path supports line/scatter and heatmap rendering.
+
+**Decisions:** Keep reduction, coordinate joining, grid diagnostics, and plot-data generation in the existing core/pipeline layers. Render the returned plot data on the Qt thread only after the worker completes. Use the first selected metric for this initial slice and require explicit x/y roles for heatmaps.
+
+**Evidence:** The real pressure sweep end-to-end GUI test selects `gCarPotential`, produces a 5x5 heatmap, renders a figure, and populates 25 result rows. Full test suite passes with 62 tests and no editor diagnostics in changed files.
+
+**Next:** Add filter controls, plot-axis controls, visible diagnostics for incomplete/duplicate points, and baseline comparison to the Results/Comparison tabs.
+
+## 2026-08-27 - Synchronize axis roles before analysis
+
+**Goal:** Fix heatmap analysis failing even though the GUI visibly showed selected x and y roles.
+
+**Root cause:** Role selectors were read when variables were confirmed, but the controls remained editable afterward. A user could change the visible roles to x/y after loading while `AnalysisConfig` still contained `unused` roles; analysis correctly rejected the stale configuration.
+
+**Changed:** Updated `main_window.py` so role edits immediately update matching `SweepVariableConfig` entries and are synchronized again immediately before analysis. Extended the end-to-end GUI test to confirm variables with default roles, change them to x/y afterward, and successfully produce the heatmap.
+
+**Evidence:** The exact reported post-confirmation x/y workflow now passes. Full test suite passes with 62 tests and no editor diagnostics in changed files.
+
+**Next:** Add filter controls, plot-axis controls, visible diagnostics for incomplete/duplicate points, and baseline comparison to the Results/Comparison tabs.
+
+## 2026-08-27 - Add configurable phase and turn-zone filters
+
+**Goal:** Fix analysis configuration gaps exposed by the first real heatmap workflow.
+
+**Changed:** Updated `main_window.py` to populate selectable phase and turn-zone lists from loaded runs, with separate OR/AND operators within each category and an AND/OR operator between categories. The selected values are now written into `FilterConfig` immediately before analysis. Added a role-recovery guard that rebuilds the active sweep-variable configuration from visible x/y controls when confirmation captured an incomplete role set. Expanded the real GUI test to exercise post-confirmation role changes and phase/turn-zone selection.
+
+**Root cause:** The checkbox only displayed an intention to use turn-zone masks; it did not provide mask selection or write any filter state. Separately, role controls could display x/y while the confirmed configuration lacked one axis, producing the heatmap validation error.
+
+**Decisions:** Empty phase and zone selections remain unrestricted, matching the core filter contract. Visible role controls are synchronized before every analysis, and a visible x/y pair is used to recover missing axis entries rather than failing with a misleading generic message.
+
+**Evidence:** The pressure-sweep GUI test now selects a phase and turn zone, configures their operators, recovers a missing saved y role, and completes the heatmap. Full test suite passes with 62 tests and no editor diagnostics in changed files.
+
+**Next:** Add visible diagnostics for incomplete/duplicate points and baseline comparison to the Results/Comparison tabs.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

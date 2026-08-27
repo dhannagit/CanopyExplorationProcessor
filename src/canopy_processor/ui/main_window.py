@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 	QHBoxLayout,
 	QLabel,
 	QListWidget,
+	QListWidgetItem,
 	QMainWindow,
 	QProgressBar,
 	QPushButton,
@@ -28,10 +29,12 @@ from PySide6.QtWidgets import (
 	QVBoxLayout,
 	QWidget,
 )
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
-from ..config import DatasetConfig, SweepVariableConfig
+from ..config import DatasetConfig, FilterConfig, SweepVariableConfig
 from .discovery import DiscoveryResult, discover_dataset
-from .pipeline import LoadedDataset, load_dataset
+from .pipeline import AnalysisOutput, LoadedDataset, analyze_loaded_dataset, load_dataset
+from ..plotting import render_plot_data
 from .session import AnalysisSession, SessionState
 from .worker import CancellationToken, Worker, start_worker
 
@@ -126,14 +129,30 @@ class MainWindow(QMainWindow):
 		self.metric_combo = QComboBox()
 		self.metric_combo.addItem("Select metric")
 		self.plot_combo = QComboBox()
-		self.plot_combo.addItems(["Suggested plot", "Line", "Scatter", "Heatmap", "Faceted heatmap", "Parallel coordinates"])
+		for label, value in (("Suggested plot", "suggested"), ("Line", "line"), ("Scatter", "scatter"), ("Heatmap", "heatmap"), ("Faceted heatmap", "faceted_heatmap"), ("Parallel coordinates", "parallel_coordinates")):
+			self.plot_combo.addItem(label, value)
 		self.baseline_combo = QComboBox()
 		self.baseline_combo.addItems(["No baseline", "Loaded run", "External study"])
-		self.turn_zone_check = QCheckBox("Use turn-zone masks")
+		self.phase_list = QListWidget()
+		self.phase_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+		self.phase_list.setMaximumHeight(70)
+		self.zone_list = QListWidget()
+		self.zone_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+		self.zone_list.setMaximumHeight(70)
+		self.phase_operator = QComboBox()
+		self.phase_operator.addItems(["or", "and"])
+		self.zone_operator = QComboBox()
+		self.zone_operator.addItems(["or", "and"])
+		self.category_operator = QComboBox()
+		self.category_operator.addItems(["and", "or"])
 		analysis_form.addRow("Metric:", self.metric_combo)
 		analysis_form.addRow("Plot:", self.plot_combo)
 		analysis_form.addRow("Baseline:", self.baseline_combo)
-		analysis_form.addRow(self.turn_zone_check)
+		analysis_form.addRow("Phases:", self.phase_list)
+		analysis_form.addRow("Phase logic:", self.phase_operator)
+		analysis_form.addRow("Turn zones:", self.zone_list)
+		analysis_form.addRow("Zone logic:", self.zone_operator)
+		analysis_form.addRow("Category logic:", self.category_operator)
 		layout.addWidget(analysis)
 
 		apply_button = QPushButton("Apply / Analyze")
@@ -149,10 +168,14 @@ class MainWindow(QMainWindow):
 		tabs = QTabWidget()
 		results = QWidget()
 		results_layout = QVBoxLayout(results)
-		results_layout.addWidget(QLabel("Results canvas is ready for the first analysis."))
-		table = QTableWidget(0, 0)
-		table.setMinimumHeight(180)
-		results_layout.addWidget(table)
+		self.results_label = QLabel("Results canvas is ready for the first analysis.")
+		results_layout.addWidget(self.results_label)
+		self.figure_canvas = FigureCanvasQTAgg()
+		self.figure_canvas.setMinimumHeight(300)
+		results_layout.addWidget(self.figure_canvas, 1)
+		self.results_table = QTableWidget(0, 0)
+		self.results_table.setMinimumHeight(180)
+		results_layout.addWidget(self.results_table)
 		tabs.addTab(results, "Results")
 		comparison = QTextEdit("Baseline comparison will use the active metric, filters, and plot selections.")
 		comparison.setReadOnly(True)
@@ -233,12 +256,24 @@ class MainWindow(QMainWindow):
 			self.variable_list.setItem(row, 0, QTableWidgetItem(f"{variable.path}{units} ({len(variable.values)} values)"))
 			role = QComboBox()
 			role.addItems(["unused", "x", "y", "facet", "color"])
+			role.currentTextChanged.connect(lambda value, row=row: self._update_config_role(row, value))
 			self.variable_list.setCellWidget(row, 1, role)
 		if not result.variables:
 			self.variable_list.setRowCount(1)
 			self.variable_list.setItem(0, 0, QTableWidgetItem("No numeric sweep variables found"))
 		self.confirm_button.setEnabled(bool(result.variables) and result.dxpx_directory is not None and result.raw_directory is not None)
 		self.status_label.setText(self._discovery_status(result))
+
+	def _update_config_role(self, row: int, role: str) -> None:
+		"""Keep visible role edits synchronized after variable confirmation."""
+
+		if row >= len(self.session.discovered_variables):
+			return
+		path = self.session.discovered_variables[row].path
+		for variable in self.session.config.sweep_variables:
+			if variable.path == path:
+				variable.role = role
+				return
 
 	def _choose_dxpx(self) -> None:
 		path = QFileDialog.getExistingDirectory(self, "Select DXPX study folder")
@@ -313,6 +348,17 @@ class MainWindow(QMainWindow):
 		self.metric_combo.addItem("Select metric")
 		for name, metric in loaded.metrics.items():
 			self.metric_combo.addItem(f"{metric.label} [{metric.units}]", name)
+		self.phase_list.clear()
+		self.zone_list.clear()
+		if loaded.runs:
+			phase_names = sorted(
+				name for name in loaded.runs[0].data
+				if name.startswith("is") and not name.startswith("isTurnZone")
+			)
+			for name in phase_names:
+				self.phase_list.addItem(name)
+			for name in loaded.runs[0].turn_zone_names:
+				self.zone_list.addItem(name)
 		if loaded.diagnostics:
 			self.status_label.setText(f"Loaded {len(loaded.runs)} run(s) with {len(loaded.diagnostics)} diagnostic(s)")
 		else:
@@ -345,10 +391,104 @@ class MainWindow(QMainWindow):
 		if self.session.state not in {SessionState.READY, SessionState.RESULTS_AVAILABLE}:
 			self.status_label.setText("Review the discovered variables before applying analysis")
 			return
+		loaded = self.session.loaded_dataset
+		if not isinstance(loaded, LoadedDataset):
+			self.status_label.setText("Load the dataset before applying analysis")
+			return
+		metric_name = self.metric_combo.currentData()
+		if not metric_name:
+			self.status_label.setText("Select a metric before applying analysis")
+			return
+		self.session.config.metrics = [metric_name]
+		self._sync_config_roles()
+		self._ensure_roles_from_visible_controls()
+		self.session.config.filters = FilterConfig(
+			phases=tuple(item.text() for item in self.phase_list.selectedItems()),
+			turn_zones=tuple(item.text() for item in self.zone_list.selectedItems()),
+			phase_operator=self.phase_operator.currentText(),
+			turn_zone_operator=self.zone_operator.currentText(),
+			category_operator=self.category_operator.currentText(),
+		)
+		plot_type = self.plot_combo.currentData()
+		if plot_type == "suggested":
+			roles = {variable.role for variable in self.session.config.sweep_variables}
+			plot_type = "heatmap" if {"x", "y"}.issubset(roles) else "line"
+		self.session.config.plot.plot_type = plot_type
 		self.session.begin_analysis()
+		self.status_label.setText("Analyzing selected metric...")
+		self._start_analysis(loaded)
+
+	def _sync_config_roles(self) -> None:
+		"""Copy current role controls into the confirmed configuration."""
+
+		configured = {variable.path: variable for variable in self.session.config.sweep_variables}
+		for row, discovered in enumerate(self.session.discovered_variables):
+			variable = configured.get(discovered.path)
+			role_widget = self.variable_list.cellWidget(row, 1)
+			if variable is not None and isinstance(role_widget, QComboBox):
+				variable.role = role_widget.currentText()
+
+	def _ensure_roles_from_visible_controls(self) -> None:
+		"""Recover role assignments if row selection was lost after confirmation."""
+
+		roles = {
+			self.session.discovered_variables[row].path: self.variable_list.cellWidget(row, 1).currentText()
+			for row in range(self.variable_list.rowCount())
+			if row < len(self.session.discovered_variables)
+			and isinstance(self.variable_list.cellWidget(row, 1), QComboBox)
+		}
+		configured_roles = {variable.role for variable in self.session.config.sweep_variables}
+		if "x" in roles.values() and "y" in roles.values() and not {"x", "y"}.issubset(configured_roles):
+			self.session.config.sweep_variables = [
+				SweepVariableConfig(
+					path=variable.path,
+					units=variable.units,
+					role=roles[variable.path],
+				)
+				for variable in self.session.discovered_variables
+				if roles.get(variable.path, "unused") != "unused"
+			]
+
+	def _start_analysis(self, loaded: LoadedDataset) -> None:
+		config = self.session.config
+		discovered_variables = self.session.discovered_variables
+
+		def operation(token: CancellationToken, progress: object) -> AnalysisOutput:
+			if token.cancelled:
+				return None
+			return analyze_loaded_dataset(loaded, config, discovered_variables, progress)
+
+		self._thread, self._worker = start_worker(operation, start=False)
+		self._worker.progress.connect(self._show_progress)
+		self._worker.result_ready.connect(self._analysis_succeeded)
+		self._worker.failed.connect(self._operation_failed)
+		self._worker.cancelled.connect(self._operation_cancelled)
+		self._thread.finished.connect(self._worker_finished)
+		self.progress.setRange(0, 3)
+		self.progress.setValue(0)
 		self.progress.setVisible(True)
 		self.cancel_button.setVisible(True)
-		self.status_label.setText("Analysis queued")
+		self._thread.start()
+
+	def _analysis_succeeded(self, output: AnalysisOutput) -> None:
+		self.session.publish_result(output)
+		figure = render_plot_data(output.plot_data, scatter=self.session.config.plot.plot_type == "scatter")
+		self.figure_canvas.figure = figure
+		self.figure_canvas.draw()
+		self.results_label.setText(f"{output.metric_name}: {len(output.rows)} analyzed run(s)")
+		self._populate_results_table(output)
+
+	def _populate_results_table(self, output: AnalysisOutput) -> None:
+		paths = [variable.path for variable in self.session.config.sweep_variables]
+		self.results_table.setColumnCount(len(paths) + 3)
+		self.results_table.setHorizontalHeaderLabels(paths + ["Run", "Value", "Samples"])
+		self.results_table.setRowCount(len(output.rows))
+		for row_index, row in enumerate(output.rows):
+			for column, path in enumerate(paths):
+				self.results_table.setItem(row_index, column, QTableWidgetItem(f"{row.sweep_values[path]:g}"))
+			self.results_table.setItem(row_index, len(paths), QTableWidgetItem(str(row.run_index)))
+			self.results_table.setItem(row_index, len(paths) + 1, QTableWidgetItem(f"{row.metric_result.value:.6g}"))
+			self.results_table.setItem(row_index, len(paths) + 2, QTableWidgetItem(str(row.metric_result.selected_samples)))
 
 	def _cancel_analysis(self) -> None:
 		if self._worker is not None:

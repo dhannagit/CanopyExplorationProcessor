@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Callable
 
 from ..dxpx import DXPXRun, load_dxpx
+from ..analysis import analyze_runs
+from ..config import AnalysisConfig, PlotConfig
+from ..plot_data import build_plot_data
+from ..results import build_grid, join_sweep_variables
 from ..metric import Metric, default_metrics
 from ..turn_zones import add_turn_zones
 from .discovery import DiscoveryResult
@@ -19,6 +23,74 @@ class LoadedDataset:
 	runs: tuple[DXPXRun, ...]
 	metrics: dict[str, Metric]
 	diagnostics: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AnalysisOutput:
+	"""Reduced rows and renderer-independent plot data for one analysis."""
+
+	rows: tuple[object, ...]
+	grid: object
+	plot_data: object
+	metric_name: str
+
+
+def analyze_loaded_dataset(
+	loaded: LoadedDataset,
+	config: AnalysisConfig,
+	discovered_variables: tuple[object, ...],
+	progress: Callable[[str, int, int], None] | None = None,
+) -> AnalysisOutput:
+	"""Reduce loaded runs and prepare plot data from the GUI configuration."""
+
+	if not loaded.runs:
+		raise ValueError("No loaded runs are available for analysis")
+	metric_name = config.metrics[0] if config.metrics else next(iter(loaded.metrics), None)
+	if not metric_name or metric_name not in loaded.metrics:
+		raise ValueError("Select a compatible metric before analysis")
+	selected_paths = {variable.path for variable in config.sweep_variables}
+	variables = tuple(variable for variable in discovered_variables if variable.path in selected_paths)
+	if not variables:
+		raise ValueError("Select at least one sweep variable before analysis")
+	if progress:
+		progress("Reducing metric values", 1, 3)
+	results = analyze_runs(loaded.runs, loaded.metrics[metric_name], config.filters)
+	if progress:
+		progress("Joining sweep coordinates", 2, 3)
+	rows = join_sweep_variables(loaded.runs, results, variables)
+	grid = build_grid(rows, variable_paths=[variable.path for variable in variables])
+	plot = _plot_config_from_roles(config, metric_name)
+	if progress:
+		progress("Building plot data", 3, 3)
+	return AnalysisOutput(
+		rows=tuple(rows),
+		grid=grid,
+		plot_data=build_plot_data(grid, plot),
+		metric_name=metric_name,
+	)
+
+
+def _plot_config_from_roles(config: AnalysisConfig, metric_name: str) -> PlotConfig:
+	"""Create the active plot configuration from selected variable roles."""
+
+	roles = {variable.role: variable.path for variable in config.sweep_variables}
+	x_variable = roles.get("x")
+	y_variable = roles.get("y")
+	facets = tuple(variable.path for variable in config.sweep_variables if variable.role == "facet")
+	color_variable = roles.get("color")
+	plot_type = config.plot.plot_type
+	if plot_type == "line" and not x_variable:
+		raise ValueError("Assign one selected sweep variable to the x role")
+	if plot_type in {"heatmap", "faceted_heatmap"} and (not x_variable or not y_variable):
+		raise ValueError("Heatmaps require selected x and y sweep variables")
+	return PlotConfig(
+		plot_type=plot_type,
+		x_variable=x_variable,
+		y_variable=y_variable,
+		facet_variables=facets,
+		color_variable=color_variable,
+		annotate=config.plot.annotate,
+	)
 
 
 def load_dataset(

@@ -209,6 +209,30 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Add per-variable axis-role controls, then connect the confirmed configuration to staged background loading, reduction, plotting, and diagnostics.
 
+## 2026-08-27 - Add sweep-variable axis roles
+
+**Goal:** Let users configure how selected sweep variables participate in the eventual plot and analysis dimensions.
+
+**Changed:** Replaced the plain candidate list in `main_window.py` with a multi-select table containing variable metadata and a per-row role selector. Each discovered variable can now be assigned `unused`, `x`, `y`, `facet`, or `color`. Confirmation persists only selected rows and their roles as `SweepVariableConfig` entries. Expanded the Qt tests to cover one selected variable with an `x` role and both pressure variables assigned to `x` and `y`.
+
+**Decisions:** Keep variable selection and axis-role assignment together so the configuration is explicit before analysis begins. Do not infer axis roles from variable names or selection order; default every candidate to `unused` until the user chooses a role.
+
+**Evidence:** Full test suite passes with 55 tests. The editor reports no diagnostics in the changed GUI module or tests.
+
+**Next:** Connect the confirmed configuration to staged background loading, turn-zone preparation, metric reduction, plot-data generation, and Matplotlib rendering.
+
+## 2026-08-27 - Fix discovery completion race
+
+**Goal:** Resolve the GUI hang where discovery reached 100% on "Reading sweep metadata" without populating sweep variables, and cancellation left the window unresponsive.
+
+**Changed:** Updated `main_window.py` to create discovery workers without starting them, connect every result/error/cancellation handler, and only then start the thread. This prevents fast discovery operations from emitting `result_ready` before the window is listening. Extended `AnalysisSession` so discovery can enter `CANCELLING` and return to `EMPTY` after cooperative cancellation when no prior result exists. Added focused cancellation coverage.
+
+**Root cause:** `_start_discovery()` previously called `start_worker(operation)` with its default immediate start, then connected the signals. The final progress signal could arrive, but the result signal could be lost before `_discovery_succeeded()` was connected, leaving the progress display at 100% and the variable table empty.
+
+**Evidence:** Focused GUI/session tests pass with 9 tests. Full test suite passes with 56 tests. The sample discovery workflow now reliably receives its result, and the editor reports no diagnostics in changed files.
+
+**Next:** Connect the confirmed configuration to staged background loading, turn-zone preparation, metric reduction, plot-data generation, and Matplotlib rendering.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

@@ -30,3 +30,12 @@ def test_cancellation_does_not_discard_result() -> None:
 
 	assert session.state is SessionState.CANCELLING
 	assert session.has_results
+
+
+def test_discovery_cancellation_returns_to_empty() -> None:
+	session = AnalysisSession()
+	session.begin_discovery()
+	session.request_cancel()
+	session.complete_cancellation()
+
+	assert session.state is SessionState.EMPTY

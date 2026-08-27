@@ -86,8 +86,16 @@ class AnalysisSession:
 	def request_cancel(self) -> None:
 		"""Record a cancellation request without discarding current results."""
 
-		if self.state == SessionState.ANALYZING:
+		if self.state in {SessionState.DISCOVERING, SessionState.ANALYZING}:
 			self.state = SessionState.CANCELLING
+
+	def complete_cancellation(self) -> None:
+		"""Return to an idle state after a cooperative cancellation."""
+
+		self.state = SessionState.RESULTS_AVAILABLE if self.has_results else SessionState.EMPTY
+		self.progress_stage = None
+		self.progress_value = 0
+		self.progress_total = None
 
 	def publish_result(self, result: Any) -> None:
 		"""Publish a completed result and clear transient failure state."""

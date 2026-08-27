@@ -7,6 +7,7 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
 	QCheckBox,
 	QComboBox,
+	QAbstractItemView,
 	QDockWidget,
 	QFileDialog,
 	QFormLayout,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
 	QSplitter,
 	QTabWidget,
 	QTableWidget,
+	QTableWidgetItem,
 	QTextEdit,
 	QVBoxLayout,
 	QWidget,
@@ -93,9 +95,12 @@ class MainWindow(QMainWindow):
 
 		variables = QGroupBox("Sweep variables")
 		variables_layout = QVBoxLayout(variables)
-		self.variable_list = QListWidget()
-		self.variable_list.setSelectionMode(QListWidget.ExtendedSelection)
-		self.variable_list.addItem("Review discovered variables after loading")
+		self.variable_list = QTableWidget(0, 2)
+		self.variable_list.setHorizontalHeaderLabels(["Variable", "Role"])
+		self.variable_list.setSelectionBehavior(QAbstractItemView.SelectRows)
+		self.variable_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+		self.variable_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
+		self.variable_list.setMinimumHeight(130)
 		variables_layout.addWidget(self.variable_list)
 		self.confirm_button = QPushButton("Confirm variables")
 		self.confirm_button.setEnabled(False)
@@ -166,7 +171,7 @@ class MainWindow(QMainWindow):
 			self.root_label.setText(path)
 			self.session.begin_discovery()
 			self.variable_list.clear()
-			self.variable_list.addItem("Discovering source data...")
+			self.variable_list.setRowCount(0)
 			self.confirm_button.setEnabled(False)
 			self.status_label.setText("Discovering source data...")
 			self._start_discovery(path)
@@ -180,7 +185,7 @@ class MainWindow(QMainWindow):
 			progress("Reading sweep metadata", 2, 2)
 			return result
 
-		self._thread, self._worker = start_worker(operation)
+		self._thread, self._worker = start_worker(operation, start=False)
 		self._worker.progress.connect(self._show_progress)
 		self._worker.result_ready.connect(self._discovery_succeeded)
 		self._worker.failed.connect(self._operation_failed)
@@ -190,6 +195,7 @@ class MainWindow(QMainWindow):
 		self.progress.setValue(0)
 		self.progress.setVisible(True)
 		self.cancel_button.setVisible(True)
+		self._thread.start()
 
 	def _show_progress(self, stage: str, value: int, total: int) -> None:
 		self.session.update_progress(stage, value, total)
@@ -200,11 +206,18 @@ class MainWindow(QMainWindow):
 	def _discovery_succeeded(self, result: DiscoveryResult) -> None:
 		self.session.finish_discovery(result.variables, list(result.diagnostics), result)
 		self.variable_list.clear()
-		for variable in result.variables:
+		self.variable_list.setColumnCount(2)
+		self.variable_list.setHorizontalHeaderLabels(["Variable", "Role"])
+		self.variable_list.setRowCount(len(result.variables))
+		for row, variable in enumerate(result.variables):
 			units = f" [{variable.units}]" if variable.units else ""
-			self.variable_list.addItem(f"{variable.path}{units} ({len(variable.values)} values)")
+			self.variable_list.setItem(row, 0, QTableWidgetItem(f"{variable.path}{units} ({len(variable.values)} values)"))
+			role = QComboBox()
+			role.addItems(["unused", "x", "y", "facet", "color"])
+			self.variable_list.setCellWidget(row, 1, role)
 		if not result.variables:
-			self.variable_list.addItem("No numeric sweep variables found")
+			self.variable_list.setRowCount(1)
+			self.variable_list.setItem(0, 0, QTableWidgetItem("No numeric sweep variables found"))
 		self.confirm_button.setEnabled(bool(result.variables) and result.dxpx_directory is not None and result.raw_directory is not None)
 		self.status_label.setText(self._discovery_status(result))
 
@@ -217,7 +230,7 @@ class MainWindow(QMainWindow):
 		result = self.session.discovery_result
 		if not isinstance(result, DiscoveryResult) or result.dxpx_directory is None or result.raw_directory is None:
 			return
-		selected_rows = sorted({self.variable_list.row(item) for item in self.variable_list.selectedItems()})
+		selected_rows = sorted({index.row() for index in self.variable_list.selectionModel().selectedRows()})
 		if not selected_rows:
 			self.status_label.setText("Select at least one sweep variable")
 			return
@@ -226,13 +239,13 @@ class MainWindow(QMainWindow):
 			raw_directory=result.raw_directory,
 			circuit_workbook=result.circuit_workbook,
 		)
-		self.session.config.sweep_variables = [
-			SweepVariableConfig(
-				path=result.variables[row].path,
-				units=result.variables[row].units,
+		self.session.config.sweep_variables = []
+		for row in selected_rows:
+			role_widget = self.variable_list.cellWidget(row, 1)
+			role = role_widget.currentText() if isinstance(role_widget, QComboBox) else "unused"
+			self.session.config.sweep_variables.append(
+				SweepVariableConfig(path=result.variables[row].path, units=result.variables[row].units, role=role)
 			)
-			for row in selected_rows
-		]
 		self.session.mark_ready()
 		self.confirm_button.setEnabled(False)
 		self.status_label.setText("Configuration ready; choose analysis settings and apply")
@@ -242,6 +255,7 @@ class MainWindow(QMainWindow):
 		self.status_label.setText(f"Operation failed: {message}")
 
 	def _operation_cancelled(self) -> None:
+		self.session.complete_cancellation()
 		self.status_label.setText("Operation cancelled; previous results are preserved")
 
 	def _worker_finished(self) -> None:

@@ -37,14 +37,16 @@ def test_main_window_populates_discovered_variables() -> None:
 	application.processEvents()
 
 	assert window.session.discovery_result is not None
-	assert window.variable_list.count() == 2
+	assert window.variable_list.rowCount() == 2
 	assert window.variable_list.selectionMode().name == "ExtendedSelection"
 	assert window.confirm_button.isEnabled()
-	window.variable_list.item(0).setSelected(True)
+	window.variable_list.selectRow(0)
+	window.variable_list.cellWidget(0, 1).setCurrentText("x")
 	window._confirm_variables()
 	assert [variable.path for variable in window.session.config.sweep_variables] == [
 		window.session.discovered_variables[0].path
 	]
+	assert window.session.config.sweep_variables[0].role == "x"
 
 	window.close()
 	application.processEvents()
@@ -63,6 +65,8 @@ def test_main_window_persists_multiple_selected_variables() -> None:
 	application.processEvents()
 
 	window.variable_list.selectAll()
+	window.variable_list.cellWidget(0, 1).setCurrentText("x")
+	window.variable_list.cellWidget(1, 1).setCurrentText("y")
 	window._confirm_variables()
 
 	assert [variable.path for variable in window.session.config.sweep_variables] == [

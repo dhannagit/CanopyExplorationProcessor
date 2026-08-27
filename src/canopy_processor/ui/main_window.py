@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
@@ -29,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from ..config import DatasetConfig, SweepVariableConfig
 from .discovery import DiscoveryResult, discover_dataset
+from .pipeline import LoadedDataset, load_dataset
 from .session import AnalysisSession, SessionState
 from .worker import CancellationToken, Worker, start_worker
 
@@ -87,10 +90,20 @@ class MainWindow(QMainWindow):
 		dataset_form = QFormLayout(dataset)
 		self.root_label = QLabel("No root selected")
 		self.root_label.setObjectName("muted")
-		select_root = QPushButton("Select root folder")
-		select_root.clicked.connect(self._select_root)
+		self.raw_label = QLabel("Not detected")
+		self.raw_label.setObjectName("muted")
+		self.dxpx_label = QLabel("Not detected")
+		self.dxpx_label.setObjectName("muted")
+		select_root = QPushButton("Select raw study folder")
+		select_root.clicked.connect(self._select_raw_study)
 		dataset_form.addRow(select_root)
-		dataset_form.addRow("Source:", self.root_label)
+		dataset_form.addRow("Study:", self.root_label)
+		dataset_form.addRow("Raw:", self.raw_label)
+		dataset_form.addRow("DXPX:", self.dxpx_label)
+		self.choose_dxpx_button = QPushButton("Choose DXPX folder")
+		self.choose_dxpx_button.setEnabled(False)
+		self.choose_dxpx_button.clicked.connect(self._choose_dxpx)
+		dataset_form.addRow(self.choose_dxpx_button)
 		layout.addWidget(dataset)
 
 		variables = QGroupBox("Sweep variables")
@@ -165,13 +178,16 @@ class MainWindow(QMainWindow):
 		dock.setWidget(content)
 		self.addDockWidget(Qt.BottomDockWidgetArea, dock)
 
-	def _select_root(self) -> None:
-		path = QFileDialog.getExistingDirectory(self, "Select Canopy exploration root")
+	def _select_raw_study(self) -> None:
+		path = QFileDialog.getExistingDirectory(self, "Select one raw StudyName folder")
 		if path:
 			self.root_label.setText(path)
 			self.session.begin_discovery()
 			self.variable_list.clear()
 			self.variable_list.setRowCount(0)
+			self.raw_label.setText("Not detected")
+			self.dxpx_label.setText("Not detected")
+			self.choose_dxpx_button.setEnabled(False)
 			self.confirm_button.setEnabled(False)
 			self.status_label.setText("Discovering source data...")
 			self._start_discovery(path)
@@ -205,6 +221,9 @@ class MainWindow(QMainWindow):
 
 	def _discovery_succeeded(self, result: DiscoveryResult) -> None:
 		self.session.finish_discovery(result.variables, list(result.diagnostics), result)
+		self.raw_label.setText(str(result.raw_directory or "Not detected"))
+		self.dxpx_label.setText(str(result.dxpx_directory or "Not detected"))
+		self.choose_dxpx_button.setEnabled(result.raw_directory is not None)
 		self.variable_list.clear()
 		self.variable_list.setColumnCount(2)
 		self.variable_list.setHorizontalHeaderLabels(["Variable", "Role"])
@@ -220,6 +239,27 @@ class MainWindow(QMainWindow):
 			self.variable_list.setItem(0, 0, QTableWidgetItem("No numeric sweep variables found"))
 		self.confirm_button.setEnabled(bool(result.variables) and result.dxpx_directory is not None and result.raw_directory is not None)
 		self.status_label.setText(self._discovery_status(result))
+
+	def _choose_dxpx(self) -> None:
+		path = QFileDialog.getExistingDirectory(self, "Select DXPX study folder")
+		if not path:
+			return
+		result = self.session.discovery_result
+		if not isinstance(result, DiscoveryResult):
+			return
+		updated = DiscoveryResult(
+			root=result.root,
+			dxpx_directory=Path(path),
+			raw_directory=result.raw_directory,
+			circuit_workbook=result.circuit_workbook,
+			variables=result.variables,
+			exploration=result.exploration,
+			diagnostics=result.diagnostics,
+			dxpx_candidates=result.dxpx_candidates,
+		)
+		self.session.discovery_result = updated
+		self.dxpx_label.setText(path)
+		self.status_label.setText("Manual DXPX path selected; review and confirm")
 
 	def _discovery_status(self, result: DiscoveryResult) -> str:
 		if result.diagnostics:
@@ -248,7 +288,35 @@ class MainWindow(QMainWindow):
 			)
 		self.session.mark_ready()
 		self.confirm_button.setEnabled(False)
-		self.status_label.setText("Configuration ready; choose analysis settings and apply")
+		self.status_label.setText("Loading simulation runs...")
+		self._start_loading(result)
+
+	def _start_loading(self, discovery: DiscoveryResult) -> None:
+		self.session.begin_loading()
+
+		def operation(token: CancellationToken, progress: object) -> LoadedDataset:
+			return load_dataset(discovery, lambda: token.cancelled, progress)
+
+		self._thread, self._worker = start_worker(operation, start=False)
+		self._worker.progress.connect(self._show_progress)
+		self._worker.result_ready.connect(self._loading_succeeded)
+		self._worker.failed.connect(self._operation_failed)
+		self._worker.cancelled.connect(self._operation_cancelled)
+		self._thread.finished.connect(self._worker_finished)
+		self.progress.setVisible(True)
+		self.cancel_button.setVisible(True)
+		self._thread.start()
+
+	def _loading_succeeded(self, loaded: LoadedDataset) -> None:
+		self.session.publish_loaded_dataset(loaded)
+		self.metric_combo.clear()
+		self.metric_combo.addItem("Select metric")
+		for name, metric in loaded.metrics.items():
+			self.metric_combo.addItem(f"{metric.label} [{metric.units}]", name)
+		if loaded.diagnostics:
+			self.status_label.setText(f"Loaded {len(loaded.runs)} run(s) with {len(loaded.diagnostics)} diagnostic(s)")
+		else:
+			self.status_label.setText(f"Loaded {len(loaded.runs)} run(s); choose a metric and apply")
 
 	def _operation_failed(self, message: str) -> None:
 		self.session.fail(message)

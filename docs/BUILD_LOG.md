@@ -233,6 +233,42 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Connect the confirmed configuration to staged background loading, turn-zone preparation, metric reduction, plot-data generation, and Matplotlib rendering.
 
+## 2026-08-27 - Load confirmed dataset and discover metrics
+
+**Goal:** Move the GUI from reviewed configuration into real source-data loading without blocking the Qt event loop.
+
+**Changed:** Added `src/canopy_processor/ui/pipeline.py` with `LoadedDataset` and `load_dataset()`. The loader finds numbered `.dXpx` runs, loads them through the native adapter, generates missing turn-zone masks from the discovered circuit workbook, retains non-fatal run diagnostics, and checks the default metric catalog against loaded data. Added a `LOADING` session state and connected variable confirmation to a background loading worker. The GUI now stores loaded runs in session state and populates the metric selector with compatible metrics.
+
+**Decisions:** Keep loading separate from analysis reduction and plotting. Treat individual run failures as diagnostics while allowing valid runs to continue. Adapt cancellation through a callable predicate so the pipeline remains independent of Qt.
+
+**Evidence:** Confirming both pressure variables against the sample data loads 25 simulation runs and populates the metric selector. Full test suite passes with 56 tests. A focused integration test also caught and fixed an incorrect boolean/callable cancellation adapter.
+
+**Next:** Add metric/filter/reduction controls and connect the loaded runs to joined sweep results, grid diagnostics, plot-data generation, and Matplotlib rendering.
+
+## 2026-08-27 - Match raw and DXPX study folders
+
+**Goal:** Make DXPX autodetection follow the production Canopy directory layout instead of stopping at the `DATA_dXpx` container.
+
+**Changed:** Updated `ui/discovery.py` to identify the raw study directory under `DATA_Raw`, match its study name and worksheet parent against DXPX directories above their numbered run folders, and expose all matching DXPX candidates. Updated `main_window.py` to show the resolved raw and DXPX paths separately, enable a manual `Choose DXPX folder` override, and use the selected path for later loading. Added tests for the `DATA_Raw/02_Worksheets/WorksheetName/StudyName` to `DATA_dXpx/WorksheetName/StudyName` pairing and verified the existing sample now resolves to its study-level DXPX directory.
+
+**Decisions:** Prefer an exact worksheet/study match, then fall back to a study-name match. Keep manual selection available when multiple studies or nonstandard folder names prevent a unique automatic match. The DXPX path shown to the user is the actual study folder containing numbered run directories, not merely the top-level data container.
+
+**Evidence:** Focused discovery and GUI tests pass with 5 tests. Full test suite passes with 57 tests. The sample resolves `DATA_dXpx/MOS_COR_TyrePressureExploration`, and the GUI displays that path below the raw directory. The editor reports no diagnostics in changed files.
+
+**Next:** Add metric/filter/reduction controls and connect the loaded runs to joined sweep results, grid diagnostics, plot-data generation, and Matplotlib rendering.
+
+## 2026-08-27 - Select one raw study as the GUI input
+
+**Goal:** Prevent dataset discovery from scanning an entire worksheet containing many studies and ensure the DXPX path belongs to the selected raw study.
+
+**Changed:** Updated `ui/discovery.py` so the selected path is one raw `StudyName` directory containing its numbered job folders and exploration metadata. DXPX autodetection now derives the sibling path by replacing `DATA_Raw/02_Worksheets` with `DATA_dXpx`, then validates that the DXPX study contains numbered run folders with `.dXpx` files. Updated `main_window.py` so the entry button reads `Select raw study folder`; the displayed Study, Raw, and DXPX paths now represent the selected study rather than a broad container. Added matching-layout coverage and adjusted GUI tests to use the study-level input.
+
+**Decisions:** Do not auto-select among hundreds of `StudyName` folders. The user chooses exactly one raw study, and the application derives its DXPX counterpart from the known directory contract. The manual DXPX chooser remains available for exceptional or nonstandard layouts.
+
+**Evidence:** The sample workflow now starts from `DATA_Raw/MOS_COR_TyrePressureExploration` and resolves `DATA_dXpx/MOS_COR_TyrePressureExploration`. The production-layout test covers `DATA_Raw/02_Worksheets/WorksheetA/StudyA` paired with `DATA_dXpx/WorksheetA/StudyA`. Full test suite passes with 57 tests, and the combined GUI tests pass without Qt teardown failures.
+
+**Next:** Add metric/filter/reduction controls and connect the loaded runs to joined sweep results, grid diagnostics, plot-data generation, and Matplotlib rendering.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

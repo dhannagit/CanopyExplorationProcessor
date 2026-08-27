@@ -19,33 +19,33 @@ class DiscoveryResult:
 	variables: tuple[SweepVariable, ...]
 	exploration: ExplorationDefinition | None
 	diagnostics: tuple[str, ...]
+	dxpx_candidates: tuple[Path, ...] = ()
 
 
 def discover_dataset(root: str | Path) -> DiscoveryResult:
-	"""Discover Canopy inputs below a user-selected root directory."""
+	"""Discover one raw study and its matching DXPX study directory.
+
+	The selected path is expected to be a single ``StudyName`` directory,
+	not the parent containing many studies.
+	"""
 
 	root_path = Path(root).expanduser().resolve()
 	diagnostics: list[str] = []
-	dxpx_directory = _find_directory(root_path, "DATA_dXpx", "dXpx")
-	raw_directory = _find_directory(root_path, "DATA_Raw", "Raw")
-	if raw_directory is not None and not (raw_directory / "exploration-map.json").is_file():
-		nested_metadata = sorted(raw_directory.rglob("exploration-map.json"))
-		if nested_metadata:
-			raw_directory = nested_metadata[0].parent
-	if dxpx_directory is not None and not any(dxpx_directory.rglob("*.dXpx")):
-		nested_dxpx = sorted(dxpx_directory.rglob("*.dXpx"))
-		if nested_dxpx:
-			dxpx_directory = nested_dxpx[0].parent
-	if dxpx_directory is None and any(root_path.rglob("*.dXpx")):
-		dxpx_directory = root_path
-	if raw_directory is None and any(root_path.glob("*/job-document.json")):
-		raw_directory = root_path
+	raw_directory = root_path
+	dxpx_directory = _derive_dxpx_directory(raw_directory)
+	dxpx_candidates = (dxpx_directory,) if dxpx_directory is not None else ()
+	if not _looks_like_raw_study(raw_directory):
+		diagnostics.append("Select one raw StudyName folder containing numbered job folders")
+		raw_directory = None
+	if dxpx_directory is None or not _has_indexed_dxpx_runs(dxpx_directory):
+		diagnostics.append("No matching DXPX StudyName folder with indexed .dXpx runs was found")
+		dxpx_directory = None
 	if dxpx_directory is None:
 		diagnostics.append("No .dXpx files were found below the selected root")
 	if raw_directory is None:
 		diagnostics.append("No numbered raw job folders were found below the selected root")
 
-	workbook = next(root_path.glob("CircuitsData_*.xlsx"), None)
+	workbook = _find_workbook(root_path)
 	if workbook is None:
 		diagnostics.append("No circuit workbook was discovered")
 
@@ -72,7 +72,50 @@ def discover_dataset(root: str | Path) -> DiscoveryResult:
 		variables=variables,
 		exploration=exploration,
 		diagnostics=tuple(diagnostics),
+		dxpx_candidates=dxpx_candidates,
 	)
+
+
+def _looks_like_raw_study(path: Path) -> bool:
+	"""Identify a selected raw study without scanning sibling studies."""
+
+	return any(path.glob("*/job-document.json")) and (
+		(path / "exploration-map.json").is_file() or (path / "study-document.json").is_file()
+	)
+
+
+def _derive_dxpx_directory(raw_directory: Path) -> Path | None:
+	"""Map a raw study path to its corresponding DXPX study path."""
+
+	parts = list(raw_directory.parts)
+	if "DATA_Raw" not in parts:
+		return None
+	raw_index = parts.index("DATA_Raw")
+	remainder = parts[raw_index + 1 :]
+	if remainder and remainder[0] == "02_Worksheets":
+		remainder = remainder[1:]
+	return Path(*parts[:raw_index], "DATA_dXpx", *remainder)
+
+
+def _has_indexed_dxpx_runs(path: Path) -> bool:
+	"""Return whether a DXPX study has at least one numbered run file."""
+
+	return path.is_dir() and any(
+		file.is_file() and file.suffix.lower() == ".dxpx"
+		for folder in path.iterdir()
+		if folder.is_dir() and folder.name.isdigit()
+		for file in folder.iterdir()
+	)
+
+
+def _find_workbook(path: Path) -> Path | None:
+	"""Find the circuit workbook at or above the selected study."""
+
+	for parent in (path, *path.parents):
+		matches = sorted(parent.glob("CircuitsData_*.xlsx"))
+		if matches:
+			return matches[0]
+	return None
 
 
 def _find_directory(root: Path, *names: str) -> Path | None:
@@ -91,3 +134,26 @@ def _find_directory(root: Path, *names: str) -> Path | None:
 		if matches:
 			return matches[0]
 	return None
+
+
+def _matching_dxpx_directories(container: Path, raw_study: Path) -> tuple[Path, ...]:
+	"""Find DXPX study folders matching a raw study name and worksheet."""
+
+	study_name = raw_study.name
+	worksheet_name = raw_study.parent.name
+	study_directories = {
+		path.parent.parent if path.parent.name.isdigit() else path.parent
+		for path in container.rglob("*.dXpx")
+	}
+	candidates = {
+		study
+		for study in study_directories
+		if study.name == study_name and study.parent.name == worksheet_name
+	}
+	if not candidates:
+		candidates = {
+			study
+			for study in study_directories
+			if study.name == study_name
+		}
+	return tuple(sorted(candidates))

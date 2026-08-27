@@ -15,6 +15,7 @@ class SessionState(str, Enum):
 	EMPTY = "empty"
 	DISCOVERING = "discovering"
 	REVIEW_REQUIRED = "review_required"
+	LOADING = "loading"
 	READY = "ready"
 	ANALYZING = "analyzing"
 	CANCELLING = "cancelling"
@@ -34,6 +35,7 @@ class AnalysisSession:
 	config: AnalysisConfig = field(default_factory=AnalysisConfig)
 	discovered_variables: tuple[Any, ...] = ()
 	discovery_result: Any = None
+	loaded_dataset: Any = None
 	diagnostics: list[str] = field(default_factory=list)
 	progress_stage: str | None = None
 	progress_value: int = 0
@@ -53,6 +55,7 @@ class AnalysisSession:
 		self.state = SessionState.DISCOVERING
 		self.discovered_variables = ()
 		self.discovery_result = None
+		self.loaded_dataset = None
 		self.diagnostics.clear()
 		self.last_error = None
 
@@ -70,6 +73,25 @@ class AnalysisSession:
 		if self.state not in {SessionState.REVIEW_REQUIRED, SessionState.READY}:
 			raise RuntimeError("A discovered configuration must be reviewed first")
 		self.state = SessionState.READY
+		self.last_error = None
+
+	def begin_loading(self) -> None:
+		"""Start loading runs for the reviewed dataset configuration."""
+
+		if self.state not in {SessionState.REVIEW_REQUIRED, SessionState.READY}:
+			raise RuntimeError("The session is not ready to load")
+		self.state = SessionState.LOADING
+		self.progress_stage = None
+		self.progress_value = 0
+		self.progress_total = None
+		self.last_error = None
+
+	def publish_loaded_dataset(self, dataset: Any) -> None:
+		"""Publish loaded runs and metrics while keeping the configuration ready."""
+
+		self.loaded_dataset = dataset
+		self.state = SessionState.READY
+		self.progress_stage = None
 		self.last_error = None
 
 	def begin_analysis(self) -> None:
@@ -92,7 +114,12 @@ class AnalysisSession:
 	def complete_cancellation(self) -> None:
 		"""Return to an idle state after a cooperative cancellation."""
 
-		self.state = SessionState.RESULTS_AVAILABLE if self.has_results else SessionState.EMPTY
+		if self.has_results:
+			self.state = SessionState.RESULTS_AVAILABLE
+		elif self.discovery_result is not None:
+			self.state = SessionState.READY
+		else:
+			self.state = SessionState.EMPTY
 		self.progress_stage = None
 		self.progress_value = 0
 		self.progress_total = None

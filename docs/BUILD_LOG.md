@@ -331,6 +331,18 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Add visible diagnostics for incomplete/duplicate points and baseline comparison to the Results/Comparison tabs.
 
+## 2026-08-27 - Make the GUI control rail responsive
+
+**Goal:** Keep the increasingly detailed left-side configuration controls usable on standard laptop and desktop screens.
+
+**Changed:** Updated `main_window.py` to place the control rail inside a vertical `QScrollArea`, bound its width between 285 and 360 pixels, reduce the default window size to 1100x700 with a 900x600 minimum, and shorten long dataset paths on screen while retaining the full path in tooltips. Added layout regression assertions for the scroll area and size constraints.
+
+**Decisions:** Preserve every control and let the rail scroll vertically rather than shrinking controls until labels and selectors become unusable. Keep the Results area as the flexible region. Long paths are informationally compact but remain fully inspectable by hover.
+
+**Evidence:** Focused GUI tests pass with 5 tests, including responsive rail assertions. Full test suite passes with 62 tests and no editor diagnostics in changed files.
+
+**Next:** Add visible diagnostics for incomplete/duplicate points and baseline comparison to the Results/Comparison tabs.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

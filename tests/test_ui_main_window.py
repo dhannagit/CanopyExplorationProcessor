@@ -3,7 +3,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QScrollArea
 from PySide6.QtCore import QEventLoop, QTimer
 
 from canopy_processor.ui.main_window import MainWindow
@@ -24,6 +24,10 @@ def test_main_window_builds_workbench() -> None:
 	assert window.session.state.value == "empty"
 	assert window.root_label.text() == "No root selected"
 	assert window.metric_combo.count() == 1
+	assert window.minimumSize().width() == 900
+	controls_scroll = window.findChild(QScrollArea, "controlsScroll")
+	assert controls_scroll is not None
+	assert controls_scroll.maximumWidth() == 360
 
 	window.close()
 	application.processEvents()

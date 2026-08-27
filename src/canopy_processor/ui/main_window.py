@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 	QMainWindow,
 	QProgressBar,
 	QPushButton,
+	QScrollArea,
 	QSplitter,
 	QTabWidget,
 	QTableWidget,
@@ -63,7 +64,8 @@ class MainWindow(QMainWindow):
 		self._thread = None
 		self._worker: Worker | None = None
 		self.setWindowTitle("Canopy Exploration Processor")
-		self.resize(1400, 850)
+		self.setMinimumSize(900, 600)
+		self.resize(1100, 700)
 		self.setStyleSheet(STYLE)
 		self._build_ui()
 
@@ -71,14 +73,22 @@ class MainWindow(QMainWindow):
 		root = QWidget()
 		layout = QHBoxLayout(root)
 		layout.setContentsMargins(14, 14, 14, 14)
-		layout.addWidget(self._build_controls(), 0)
+		controls_scroll = QScrollArea()
+		controls_scroll.setObjectName("controlsScroll")
+		controls_scroll.setWidgetResizable(True)
+		controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+		controls_scroll.setWidget(self._build_controls())
+		controls_scroll.setMinimumWidth(285)
+		controls_scroll.setMaximumWidth(360)
+		layout.addWidget(controls_scroll, 0)
 		layout.addWidget(self._build_results(), 1)
 		self.setCentralWidget(root)
 		self._build_status_dock()
 
 	def _build_controls(self) -> QWidget:
 		panel = QWidget()
-		panel.setMinimumWidth(300)
+		panel.setMinimumWidth(265)
+		panel.setMaximumWidth(340)
 		layout = QVBoxLayout(panel)
 
 		title = QLabel("CANOPY / EXPLORATION")
@@ -93,10 +103,14 @@ class MainWindow(QMainWindow):
 		dataset_form = QFormLayout(dataset)
 		self.root_label = QLabel("No root selected")
 		self.root_label.setObjectName("muted")
+		self.root_label.setWordWrap(True)
+		self.root_label.setToolTip("No root selected")
 		self.raw_label = QLabel("Not detected")
 		self.raw_label.setObjectName("muted")
+		self.raw_label.setWordWrap(True)
 		self.dxpx_label = QLabel("Not detected")
 		self.dxpx_label.setObjectName("muted")
+		self.dxpx_label.setWordWrap(True)
 		select_root = QPushButton("Select raw study folder")
 		select_root.clicked.connect(self._select_raw_study)
 		dataset_form.addRow(select_root)
@@ -205,6 +219,7 @@ class MainWindow(QMainWindow):
 		path = QFileDialog.getExistingDirectory(self, "Select one raw StudyName folder")
 		if path:
 			self.root_label.setText(path)
+			self.root_label.setToolTip(path)
 			self.session.begin_discovery()
 			self.variable_list.clear()
 			self.variable_list.setRowCount(0)
@@ -244,8 +259,8 @@ class MainWindow(QMainWindow):
 
 	def _discovery_succeeded(self, result: DiscoveryResult) -> None:
 		self.session.finish_discovery(result.variables, list(result.diagnostics), result)
-		self.raw_label.setText(str(result.raw_directory or "Not detected"))
-		self.dxpx_label.setText(str(result.dxpx_directory or "Not detected"))
+		self._set_path_label(self.raw_label, result.raw_directory)
+		self._set_path_label(self.dxpx_label, result.dxpx_directory)
 		self.choose_dxpx_button.setEnabled(result.raw_directory is not None)
 		self.variable_list.clear()
 		self.variable_list.setColumnCount(2)
@@ -294,7 +309,15 @@ class MainWindow(QMainWindow):
 		)
 		self.session.discovery_result = updated
 		self.dxpx_label.setText(path)
+		self.dxpx_label.setToolTip(path)
 		self.status_label.setText("Manual DXPX path selected; review and confirm")
+
+	def _set_path_label(self, label: QLabel, path: Path | None) -> None:
+		"""Show a compact path while retaining the complete value on hover."""
+
+		text = str(path) if path else "Not detected"
+		label.setText(text if len(text) <= 46 else f"...{text[-43:]}")
+		label.setToolTip(text)
 
 	def _discovery_status(self, result: DiscoveryResult) -> str:
 		if result.diagnostics:

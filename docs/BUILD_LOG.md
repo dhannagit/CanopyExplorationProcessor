@@ -381,6 +381,16 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Manually verify the confirmation interaction in the desktop app on the corrected CTMP study.
 
+## 2026-10-23 - Make phase and zone filters toggleable
+
+**Goal:** Let users deselect an individual phase or turn-zone filter with a normal click.
+
+**Changed:** Replaced extended row selection with checkable list items for both filter lists. Analysis now reads checked items only; an empty checked set remains unrestricted. Added a GUI integration test that clicks a zone checkbox off and on before verifying the analyzed filter.
+
+**Evidence:** Focused GUI/pipeline tests pass with 10 tests. Full suite passes with 68 tests.
+
+**Next:** Manually confirm checkbox hit targets and scrolling on the standard desktop layout.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

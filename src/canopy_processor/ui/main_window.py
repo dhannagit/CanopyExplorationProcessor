@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 	QHBoxLayout,
 	QLabel,
 	QListWidget,
+	QListWidgetItem,
 	QLineEdit,
 	QMainWindow,
 	QProgressBar,
@@ -169,10 +170,10 @@ class MainWindow(QMainWindow):
 		self.baseline_delta_combo.setCurrentIndex(1)
 		self._external_baseline_path: Path | None = None
 		self.phase_list = QListWidget()
-		self.phase_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+		self.phase_list.setSelectionMode(QAbstractItemView.NoSelection)
 		self.phase_list.setMaximumHeight(70)
 		self.zone_list = QListWidget()
-		self.zone_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+		self.zone_list.setSelectionMode(QAbstractItemView.NoSelection)
 		self.zone_list.setMinimumHeight(100)
 		self.zone_list.setMaximumHeight(140)
 		self.phase_operator = QComboBox()
@@ -419,8 +420,7 @@ class MainWindow(QMainWindow):
 				name for name in loaded.runs[0].data
 				if name.startswith("is") and not name.startswith("isTurnZone")
 			)
-			for name in phase_names:
-				self.phase_list.addItem(name)
+			self._set_checkable_items(self.phase_list, phase_names)
 			self._populate_zone_list(loaded)
 			missing_zones = any(not run.turn_zone_names for run in loaded.runs)
 			workbook = self.session.config.dataset.circuit_workbook if self.session.config.dataset else None
@@ -473,11 +473,22 @@ class MainWindow(QMainWindow):
 			available_zones.intersection_update(run.turn_zone_names)
 		for name in loaded.runs[0].turn_zone_names:
 			if name in available_zones:
-				self.zone_list.addItem(name)
+				self._add_checkable_item(self.zone_list, name)
 		self.zone_list.setEnabled(self.zone_list.count() > 0)
 		self.zone_list.setToolTip(
 			"" if self.zone_list.count() else "No turn-zone mask is available on every loaded run"
 		)
+
+	def _set_checkable_items(self, widget: QListWidget, names: list[str]) -> None:
+		widget.clear()
+		for name in names:
+			self._add_checkable_item(widget, name)
+
+	def _add_checkable_item(self, widget: QListWidget, name: str) -> None:
+		item = QListWidgetItem(name)
+		item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+		item.setCheckState(Qt.CheckState.Unchecked)
+		widget.addItem(item)
 
 	def _set_track_controls_visible(self, visible: bool) -> None:
 		for widget in (
@@ -576,8 +587,16 @@ class MainWindow(QMainWindow):
 		self._sync_config_roles()
 		self._ensure_roles_from_visible_controls()
 		self.session.config.filters = FilterConfig(
-			phases=tuple(item.text() for item in self.phase_list.selectedItems()),
-			turn_zones=tuple(item.text() for item in self.zone_list.selectedItems()),
+			phases=tuple(
+				self.phase_list.item(index).text()
+				for index in range(self.phase_list.count())
+				if self.phase_list.item(index).checkState() == Qt.CheckState.Checked
+			),
+			turn_zones=tuple(
+				self.zone_list.item(index).text()
+				for index in range(self.zone_list.count())
+				if self.zone_list.item(index).checkState() == Qt.CheckState.Checked
+			),
 			phase_operator=self.phase_operator.currentText(),
 			turn_zone_operator=self.zone_operator.currentText(),
 			category_operator=self.category_operator.currentText(),

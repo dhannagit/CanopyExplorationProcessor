@@ -4,6 +4,8 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QFileDialog, QScrollArea
+from PySide6.QtCore import QPoint, Qt, QEventLoop, QTimer
+from PySide6.QtTest import QTest
 from PySide6.QtCore import QEventLoop, QTimer
 
 from canopy_processor.ui.main_window import MainWindow
@@ -143,8 +145,23 @@ def test_main_window_persists_multiple_selected_variables() -> None:
 	window.variable_list.cellWidget(1, 1).setCurrentText("y")
 	assert window.phase_list.count() > 0
 	assert window.zone_list.count() > 0
-	window.phase_list.item(0).setSelected(True)
-	window.zone_list.item(0).setSelected(True)
+	phase_item = window.phase_list.item(0)
+	zone_item = window.zone_list.item(0)
+	phase_item.setCheckState(Qt.CheckState.Checked)
+	zone_item.setCheckState(Qt.CheckState.Checked)
+	zone_rect = window.zone_list.visualItemRect(zone_item)
+	QTest.mouseClick(
+		window.zone_list.viewport(),
+		Qt.MouseButton.LeftButton,
+		pos=QPoint(zone_rect.left() + 8, zone_rect.center().y()),
+	)
+	assert zone_item.checkState() == Qt.CheckState.Unchecked
+	QTest.mouseClick(
+		window.zone_list.viewport(),
+		Qt.MouseButton.LeftButton,
+		pos=QPoint(zone_rect.left() + 8, zone_rect.center().y()),
+	)
+	assert zone_item.checkState() == Qt.CheckState.Checked
 	window.phase_operator.setCurrentText("or")
 	window.zone_operator.setCurrentText("or")
 	window.category_operator.setCurrentText("and")

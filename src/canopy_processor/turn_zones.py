@@ -16,7 +16,11 @@ class TurnZoneError(RuntimeError):
     """Raised when turn zones cannot be generated for a run."""
 
 
-def add_turn_zones(run: DXPXRun, workbook_path: str | Path) -> DXPXRun:
+def add_turn_zones(
+    run: DXPXRun,
+    workbook_path: str | Path,
+    track_name: str | None = None,
+) -> DXPXRun:
     """Return a run with missing turn-zone masks populated.
 
     Existing ``isTurnZoneN`` fields are retained exactly. If no masks exist,
@@ -29,11 +33,11 @@ def add_turn_zones(run: DXPXRun, workbook_path: str | Path) -> DXPXRun:
         return run
 
     lap_distance = _as_vector(run.data.get("sLap"), "sLap")
-    track_name = run.track_name
-    if not track_name:
+    selected_track = track_name or run.track_name
+    if not selected_track:
         raise TurnZoneError(f"Run has no Header.TrackName: {run.path}")
 
-    zones = _read_circuit_zones(workbook_path, track_name)
+    zones = _read_circuit_zones(workbook_path, selected_track)
     updated_data = deepcopy(run.data)
     for index, (start, end) in enumerate(zones, start=1):
         updated_data[f"isTurnZone{index}"] = (
@@ -47,6 +51,20 @@ def add_turn_zones(run: DXPXRun, workbook_path: str | Path) -> DXPXRun:
         unit=run.unit,
         type_info=run.type_info,
     )
+
+
+def list_circuit_names(workbook_path: str | Path) -> tuple[str, ...]:
+    """Return circuit names available for user validation in the workbook."""
+
+    workbook = Path(workbook_path)
+    if not workbook.is_file():
+        raise TurnZoneError(f"Circuit workbook does not exist: {workbook}")
+    book = load_workbook(workbook, read_only=True, data_only=True)
+    try:
+        rows = book["Turns"].iter_rows(min_row=2, max_col=1, values_only=True)
+        return tuple(str(row[0]).strip() for row in rows if row[0] is not None and str(row[0]).strip())
+    finally:
+        book.close()
 
 
 def _read_circuit_zones(workbook_path: str | Path, track_name: str) -> list[tuple[float, float]]:

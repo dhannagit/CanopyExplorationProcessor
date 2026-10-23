@@ -17,6 +17,7 @@ def test_analysis_config_round_trips_as_json(tmp_path: Path) -> None:
 		dataset=DatasetConfig(
 			dxpx_directory=Path("data/dxpx"),
 			raw_directory=Path("data/raw"),
+			track_name="CTMP",
 		),
 		sweep_variables=[
 			SweepVariableConfig(

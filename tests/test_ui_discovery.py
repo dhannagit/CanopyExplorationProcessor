@@ -39,6 +39,14 @@ def test_discover_dataset_matches_worksheet_study_layout(tmp_path: Path) -> None
 	assert result.dxpx_candidates == (dxpx,)
 
 
+def test_discovery_always_uses_central_circuit_workbook(tmp_path: Path) -> None:
+	(tmp_path / "CircuitsData_Local.xlsx").write_bytes(b"local workbook")
+	result = discover_dataset(tmp_path)
+
+	assert result.circuit_workbook == REPOSITORY_ROOT / "CircuitsData_Canopy_Hypercar.xlsx"
+	assert not any("No circuit workbook" in item for item in result.diagnostics)
+
+
 def test_discover_track_temperature_variables() -> None:
 	result = discover_dataset(TRACK_TEMP_STUDY)
 

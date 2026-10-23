@@ -3,7 +3,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QScrollArea
+from PySide6.QtWidgets import QApplication, QFileDialog, QScrollArea
 from PySide6.QtCore import QEventLoop, QTimer
 
 from canopy_processor.ui.main_window import MainWindow
@@ -28,6 +28,35 @@ def test_main_window_builds_workbench() -> None:
 	controls_scroll = window.findChild(QScrollArea, "controlsScroll")
 	assert controls_scroll is not None
 	assert controls_scroll.maximumWidth() == 360
+
+	window.close()
+	application.processEvents()
+	del window
+	application.processEvents()
+
+
+def test_baseline_dropdown_configures_both_sources(monkeypatch, tmp_path: Path) -> None:
+	application = QApplication.instance() or QApplication([])
+	window = MainWindow()
+	window.baseline_run_combo.addItem("Run 4", 4)
+	window.baseline_combo.setCurrentIndex(window.baseline_combo.findData("loaded_run"))
+	assert not window.baseline_run_combo.isHidden()
+	assert window._baseline_config().run_index == 4
+
+	external_path = tmp_path / "baseline.dXpx"
+	monkeypatch.setattr(
+		QFileDialog,
+		"getOpenFileName",
+		lambda *args: (str(external_path), "DXPX files (*.dXpx *.DXPX)"),
+	)
+	window.baseline_combo.setCurrentIndex(window.baseline_combo.findData("external_study"))
+	assert not window.external_baseline_button.isHidden()
+	window._choose_external_baseline()
+	window.external_laps_edit.setText("0, 2")
+	baseline = window._baseline_config()
+	assert baseline.external_path == external_path
+	assert baseline.lap_indices == (0, 2)
+	assert baseline.delta_mode == "percent"
 
 	window.close()
 	application.processEvents()
@@ -96,6 +125,20 @@ def test_main_window_persists_multiple_selected_variables() -> None:
 	assert window.session.loaded_dataset is not None
 	assert len(window.session.loaded_dataset.runs) == 25
 	assert window.metric_combo.count() > 1
+	assert all(not run.turn_zone_names for run in window.session.loaded_dataset.runs)
+	assert window.detected_track_label.text().endswith("CTMP")
+	assert window.turn_zone_track_combo.currentData() == "CTMP"
+	assert window.zone_list.count() == 0
+	window.prepare_turn_zones_button.click()
+	loop = QEventLoop()
+	zone_thread = window._thread
+	assert zone_thread is not None
+	zone_thread.finished.connect(loop.quit)
+	QTimer.singleShot(30000, loop.quit)
+	loop.exec()
+	application.processEvents()
+	assert len(window.session.loaded_dataset.runs[0].turn_zone_names) == 12
+	assert window.detected_track_label.text() == "DXPX Header.TrackName: CTMP; zones use: CTMP"
 	window.variable_list.cellWidget(0, 1).setCurrentText("x")
 	window.variable_list.cellWidget(1, 1).setCurrentText("y")
 	assert window.phase_list.count() > 0
@@ -119,6 +162,10 @@ def test_main_window_persists_multiple_selected_variables() -> None:
 	assert {variable.role for variable in window.session.config.sweep_variables} == {"x", "y"}
 	assert window.session.config.filters.phases
 	assert window.session.config.filters.turn_zones
+	assert all(
+		row.metric_result.selected_samples < row.metric_result.available_samples
+		for row in window.session.result.rows
+	)
 	assert window.results_table.rowCount() == 25
 	assert len(window.figure_canvas.figure.axes) >= 1
 

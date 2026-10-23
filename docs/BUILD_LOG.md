@@ -343,6 +343,44 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Add visible diagnostics for incomplete/duplicate points and baseline comparison to the Results/Comparison tabs.
 
+## 2026-10-23 - Wire turn-zone filters and baseline comparison
+
+**Goal:** Confirm that generated turn-zone masks are available and usable in the GUI, and make both baseline choices functional.
+
+**Root cause:** The GUI displayed only a 70-pixel turn-zone list, and its existing integration test checked filter configuration but not selected sample counts. The baseline selector had no change handler, no run/file chooser, and the Comparison tab was static text; baseline comparison existed only in the core results module.
+
+**Changed:** `pipeline.py` now reports mask-generation failures separately without discarding otherwise loadable runs, and analysis builds baseline values and deltas through the existing core functions. `main_window.py` shows masks shared by all loaded runs, enlarges the selector, exposes run or external DXPX controls and delta mode, and renders per-run comparisons. Tests cover selected-zone reductions and both baseline sources.
+
+**Decisions:** External files use explicit zero-based comma-separated lap indices. Percent difference is the default; absolute difference is also available. A selected zone must exist on every loaded run before it is offered.
+
+**Evidence:** The sample study loads 25 runs with 12 turn-zone masks each and no load diagnostics. Selecting `isTurnZone1` reduces one run from 7,724 available samples to 785 selected samples. Focused GUI/pipeline tests pass with 9 tests; the full suite passes with 65 tests.
+
+**Next:** Add visible diagnostics for incomplete/duplicate sweep points and validate external-baseline filtering with studies that have differing mask availability.
+
+## 2026-10-23 - Use bundled circuit data for external studies
+
+**Goal:** Populate turn-zone filters when an external raw study has no circuit workbook in its directory ancestry.
+
+**Root cause:** Discovery searched only the selected study and its parents. The reported conversion tree had no nearby `CircuitsData_*.xlsx`, so runs loaded without masks and the GUI correctly showed no selectable zones.
+
+**Changed:** `discovery.py` now prefers any study-local workbook and falls back to the app-bundled `CircuitsData_Canopy_Hypercar.xlsx` when none is found. Added a discovery regression test.
+
+**Evidence:** The reported external study uses `Watkins-Glen`, which is present in the bundled workbook. The exact study now loads 21 runs, each with 13 generated turn-zone masks and no diagnostics. Full suite passes with 66 tests.
+
+**Next:** Surface a helpful warning when neither the study workbook nor the bundled workbook supports the run's track.
+
+## 2026-10-23 - Confirm circuit before generating zones
+
+**Goal:** Keep the DXPX header as the detected track, but require the user to verify the circuit used for newly generated masks and always use the central workbook.
+
+**Clarification:** The earlier path supplied for this investigation was a Watkins-Glen study, and both its DXPX header and study metadata said Watkins-Glen. The corrected CTMP path has `Header.TrackName == "CTMP"` on all 25 runs. The earlier assumption was based on the first path, not a track-name parsing defect.
+
+**Changed:** Discovery now always references `C:\Bib\Git\CanopyExplorationProcessor\CircuitsData_Canopy_Hypercar.xlsx`, ignoring workbooks near the data. Loading no longer adds zones automatically. The UI displays the DXPX header track, lets the user choose a circuit from the central workbook, and generates zones only after confirmation. The detected and confirmed track are both retained in the UI and saved analysis configuration. Baseline zone generation uses the confirmed circuit and refuses to infer it silently.
+
+**Evidence:** The corrected CTMP study loads 25 runs with CTMP headers and no existing masks. After explicit CTMP confirmation, every run receives 12 masks with no diagnostics. Full suite passes with 68 tests.
+
+**Next:** Manually verify the confirmation interaction in the desktop app on the corrected CTMP study.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

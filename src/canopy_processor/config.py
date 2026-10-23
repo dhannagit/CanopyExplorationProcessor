@@ -23,6 +23,7 @@ class DatasetConfig:
 	dxpx_directory: Path
 	raw_directory: Path
 	circuit_workbook: Path | None = None
+	track_name: str | None = None
 	baseline_path: Path | None = None
 	generate_missing_turn_zones: bool = True
 

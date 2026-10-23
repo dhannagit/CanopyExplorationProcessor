@@ -27,3 +27,12 @@ def test_existing_turn_zones_are_preserved() -> None:
 
     assert result is run
     assert np.array_equal(result.data["isTurnZone1"], existing)
+
+
+def test_explicit_track_override_does_not_change_header_track() -> None:
+    run = load_dxpx(SAMPLE_DXPX)
+    result = add_turn_zones(run, WORKBOOK, track_name="Watkins-Glen")
+
+    assert run.track_name == "CTMP"
+    assert result.track_name == "CTMP"
+    assert len(result.turn_zone_names) == 13

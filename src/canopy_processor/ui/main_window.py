@@ -7,7 +7,6 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-	QCheckBox,
 	QComboBox,
 	QAbstractItemView,
 	QDockWidget,
@@ -17,24 +16,29 @@ from PySide6.QtWidgets import (
 	QHBoxLayout,
 	QLabel,
 	QListWidget,
-	QListWidgetItem,
+	QLineEdit,
 	QMainWindow,
 	QProgressBar,
 	QPushButton,
 	QScrollArea,
-	QSplitter,
 	QTabWidget,
 	QTableWidget,
 	QTableWidgetItem,
-	QTextEdit,
 	QVBoxLayout,
 	QWidget,
 )
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
-from ..config import DatasetConfig, FilterConfig, SweepVariableConfig
+from ..config import BaselineConfig, DatasetConfig, FilterConfig, SweepVariableConfig
 from .discovery import DiscoveryResult, discover_dataset
-from .pipeline import AnalysisOutput, LoadedDataset, analyze_loaded_dataset, load_dataset
+from .pipeline import (
+	AnalysisOutput,
+	LoadedDataset,
+	analyze_loaded_dataset,
+	load_dataset,
+	prepare_turn_zones,
+)
+from ..turn_zones import list_circuit_names
 from ..plotting import render_plot_data
 from .session import AnalysisSession, SessionState
 from .worker import CancellationToken, Worker, start_worker
@@ -63,6 +67,7 @@ class MainWindow(QMainWindow):
 		self.session = AnalysisSession()
 		self._thread = None
 		self._worker: Worker | None = None
+		self._source_loaded_dataset: LoadedDataset | None = None
 		self.setWindowTitle("Canopy Exploration Processor")
 		self.setMinimumSize(900, 600)
 		self.resize(1100, 700)
@@ -91,7 +96,7 @@ class MainWindow(QMainWindow):
 		panel.setMaximumWidth(340)
 		layout = QVBoxLayout(panel)
 
-		title = QLabel("CANOPY / EXPLORATION")
+		title = QLabel("EXPLORATION PROCESSOR")
 		title.setObjectName("title")
 		layout.addWidget(title)
 		intro = QLabel("Configure a sweep, then apply it to the loaded source data.")
@@ -140,40 +145,72 @@ class MainWindow(QMainWindow):
 
 		analysis = QGroupBox("Analysis")
 		analysis_form = QFormLayout(analysis)
+		self.analysis_form = analysis_form
 		self.metric_combo = QComboBox()
 		self.metric_combo.addItem("Select metric")
 		self.plot_combo = QComboBox()
 		for label, value in (("Suggested plot", "suggested"), ("Line", "line"), ("Scatter", "scatter"), ("Heatmap", "heatmap"), ("Faceted heatmap", "faceted_heatmap"), ("Parallel coordinates", "parallel_coordinates")):
 			self.plot_combo.addItem(label, value)
 		self.baseline_combo = QComboBox()
-		self.baseline_combo.addItems(["No baseline", "Loaded run", "External study"])
+		self.baseline_combo.addItem("No baseline", "none")
+		self.baseline_combo.addItem("Loaded run", "loaded_run")
+		self.baseline_combo.addItem("External study", "external_study")
+		self.baseline_combo.currentIndexChanged.connect(self._baseline_mode_changed)
+		self.baseline_run_combo = QComboBox()
+		self.external_baseline_button = QPushButton("Choose baseline DXPX file")
+		self.external_baseline_button.clicked.connect(self._choose_external_baseline)
+		self.external_baseline_label = QLabel("No external baseline selected")
+		self.external_baseline_label.setWordWrap(True)
+		self.external_laps_edit = QLineEdit("0")
+		self.external_laps_edit.setToolTip("Zero-based lap indices, comma-separated")
+		self.baseline_delta_combo = QComboBox()
+		for label, value in (("Absolute difference", "absolute"), ("Percent difference", "percent")):
+			self.baseline_delta_combo.addItem(label, value)
+		self.baseline_delta_combo.setCurrentIndex(1)
+		self._external_baseline_path: Path | None = None
 		self.phase_list = QListWidget()
 		self.phase_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
 		self.phase_list.setMaximumHeight(70)
 		self.zone_list = QListWidget()
 		self.zone_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-		self.zone_list.setMaximumHeight(70)
+		self.zone_list.setMinimumHeight(100)
+		self.zone_list.setMaximumHeight(140)
 		self.phase_operator = QComboBox()
 		self.phase_operator.addItems(["or", "and"])
 		self.zone_operator = QComboBox()
 		self.zone_operator.addItems(["or", "and"])
 		self.category_operator = QComboBox()
 		self.category_operator.addItems(["and", "or"])
+		self.detected_track_label = QLabel("Track has not been inspected")
+		self.detected_track_label.setWordWrap(True)
+		self.turn_zone_track_combo = QComboBox()
+		self.prepare_turn_zones_button = QPushButton("Confirm track and add zones")
+		self.prepare_turn_zones_button.clicked.connect(self._prepare_turn_zones)
 		analysis_form.addRow("Metric:", self.metric_combo)
 		analysis_form.addRow("Plot:", self.plot_combo)
 		analysis_form.addRow("Baseline:", self.baseline_combo)
+		analysis_form.addRow("Baseline run:", self.baseline_run_combo)
+		analysis_form.addRow("External file:", self.external_baseline_button)
+		analysis_form.addRow("Selected file:", self.external_baseline_label)
+		analysis_form.addRow("Lap indices (0-based):", self.external_laps_edit)
+		analysis_form.addRow("Comparison:", self.baseline_delta_combo)
 		analysis_form.addRow("Phases:", self.phase_list)
 		analysis_form.addRow("Phase logic:", self.phase_operator)
+		analysis_form.addRow("Detected track:", self.detected_track_label)
+		analysis_form.addRow("Track for zones:", self.turn_zone_track_combo)
+		analysis_form.addRow(self.prepare_turn_zones_button)
 		analysis_form.addRow("Turn zones:", self.zone_list)
 		analysis_form.addRow("Zone logic:", self.zone_operator)
 		analysis_form.addRow("Category logic:", self.category_operator)
 		layout.addWidget(analysis)
 
-		apply_button = QPushButton("Apply / Analyze")
-		apply_button.setObjectName("applyButton")
-		apply_button.clicked.connect(self._begin_analysis)
-		layout.addWidget(apply_button)
+		self.apply_button = QPushButton("Apply / Analyze")
+		self.apply_button.setObjectName("applyButton")
+		self.apply_button.clicked.connect(self._begin_analysis)
+		layout.addWidget(self.apply_button)
 		layout.addStretch()
+		self._baseline_mode_changed()
+		self._set_track_controls_visible(False)
 		return panel
 
 	def _build_results(self) -> QWidget:
@@ -191,9 +228,8 @@ class MainWindow(QMainWindow):
 		self.results_table.setMinimumHeight(180)
 		results_layout.addWidget(self.results_table)
 		tabs.addTab(results, "Results")
-		comparison = QTextEdit("Baseline comparison will use the active metric, filters, and plot selections.")
-		comparison.setReadOnly(True)
-		tabs.addTab(comparison, "Comparison")
+		self.comparison_table = QTableWidget(0, 0)
+		tabs.addTab(self.comparison_table, "Comparison")
 		layout.addWidget(tabs)
 		return panel
 
@@ -221,6 +257,8 @@ class MainWindow(QMainWindow):
 			self.root_label.setText(path)
 			self.root_label.setToolTip(path)
 			self.session.begin_discovery()
+			self._source_loaded_dataset = None
+			self._set_track_controls_visible(False)
 			self.variable_list.clear()
 			self.variable_list.setRowCount(0)
 			self.raw_label.setText("Not detected")
@@ -366,6 +404,7 @@ class MainWindow(QMainWindow):
 		self._thread.start()
 
 	def _loading_succeeded(self, loaded: LoadedDataset) -> None:
+		self._source_loaded_dataset = loaded
 		self.session.publish_loaded_dataset(loaded)
 		self.metric_combo.clear()
 		self.metric_combo.addItem("Select metric")
@@ -373,6 +412,8 @@ class MainWindow(QMainWindow):
 			self.metric_combo.addItem(f"{metric.label} [{metric.units}]", name)
 		self.phase_list.clear()
 		self.zone_list.clear()
+		self.status_label.setToolTip("\n".join(loaded.diagnostics))
+		self.zone_list.setEnabled(False)
 		if loaded.runs:
 			phase_names = sorted(
 				name for name in loaded.runs[0].data
@@ -380,19 +421,128 @@ class MainWindow(QMainWindow):
 			)
 			for name in phase_names:
 				self.phase_list.addItem(name)
-			for name in loaded.runs[0].turn_zone_names:
-				self.zone_list.addItem(name)
+			self._populate_zone_list(loaded)
+			missing_zones = any(not run.turn_zone_names for run in loaded.runs)
+			workbook = self.session.config.dataset.circuit_workbook if self.session.config.dataset else None
+			if missing_zones and workbook is not None:
+				try:
+					tracks = list_circuit_names(workbook)
+				except Exception as error:
+					tracks = ()
+					self.status_label.setToolTip(f"{self.status_label.toolTip()}\n{error}".strip())
+				self.turn_zone_track_combo.clear()
+				self.turn_zone_track_combo.addItem("Select track", None)
+				for track in tracks:
+					self.turn_zone_track_combo.addItem(track, track)
+				detected_tracks = sorted({run.track_name for run in loaded.runs if run.track_name})
+				if len(detected_tracks) == 1:
+					detected = detected_tracks[0]
+					self.detected_track_label.setText(f"DXPX Header.TrackName: {detected}")
+					index = self.turn_zone_track_combo.findData(detected)
+					if index >= 0:
+						self.turn_zone_track_combo.setCurrentIndex(index)
+				elif detected_tracks:
+					self.detected_track_label.setText(
+						"Multiple DXPX tracks: " + ", ".join(detected_tracks)
+					)
+				else:
+					self.detected_track_label.setText("DXPX headers do not specify a track")
+				self.prepare_turn_zones_button.setEnabled(bool(tracks))
+				self.prepare_turn_zones_button.setText("Confirm track and add zones")
+				self._set_track_controls_visible(True)
+			else:
+				self._set_track_controls_visible(False)
+		self.zone_list.setEnabled(self.zone_list.count() > 0)
+		if not self.zone_list.count():
+			self.zone_list.setToolTip("Confirm a circuit above to generate turn-zone masks")
+		self.baseline_run_combo.clear()
+		for run in loaded.runs:
+			self.baseline_run_combo.addItem(f"Run {run.path.parent.name}", int(run.path.parent.name))
+		self._baseline_mode_changed()
 		if loaded.diagnostics:
 			self.status_label.setText(f"Loaded {len(loaded.runs)} run(s) with {len(loaded.diagnostics)} diagnostic(s)")
 		else:
 			self.status_label.setText(f"Loaded {len(loaded.runs)} run(s); choose a metric and apply")
 
+	def _populate_zone_list(self, loaded: LoadedDataset) -> None:
+		self.zone_list.clear()
+		if not loaded.runs:
+			return
+		available_zones = set(loaded.runs[0].turn_zone_names)
+		for run in loaded.runs[1:]:
+			available_zones.intersection_update(run.turn_zone_names)
+		for name in loaded.runs[0].turn_zone_names:
+			if name in available_zones:
+				self.zone_list.addItem(name)
+		self.zone_list.setEnabled(self.zone_list.count() > 0)
+		self.zone_list.setToolTip(
+			"" if self.zone_list.count() else "No turn-zone mask is available on every loaded run"
+		)
+
+	def _set_track_controls_visible(self, visible: bool) -> None:
+		for widget in (
+			self.detected_track_label,
+			self.turn_zone_track_combo,
+			self.prepare_turn_zones_button,
+		):
+			widget.setVisible(visible)
+			label = self.analysis_form.labelForField(widget)
+			if label is not None:
+				label.setVisible(visible)
+
+	def _prepare_turn_zones(self) -> None:
+		loaded = self._source_loaded_dataset
+		track_name = self.turn_zone_track_combo.currentData()
+		dataset = self.session.config.dataset
+		if loaded is None or dataset is None or dataset.circuit_workbook is None:
+			self.status_label.setText("The central circuit workbook is unavailable")
+			return
+		if not track_name:
+			self.status_label.setText("Select and confirm a circuit before adding turn zones")
+			return
+		self.session.config.dataset.track_name = str(track_name)
+		self.prepare_turn_zones_button.setEnabled(False)
+		self.status_label.setText(f"Adding turn zones for {track_name}...")
+
+		def operation(token: CancellationToken, progress: object) -> LoadedDataset:
+			if token.cancelled:
+				return None
+			return prepare_turn_zones(loaded, dataset.circuit_workbook, str(track_name))
+
+		self._thread, self._worker = start_worker(operation, start=False)
+		self._worker.result_ready.connect(self._turn_zones_succeeded)
+		self._worker.failed.connect(self._operation_failed)
+		self._worker.cancelled.connect(self._operation_cancelled)
+		self._thread.finished.connect(self._worker_finished)
+		self.progress.setVisible(True)
+		self.cancel_button.setVisible(True)
+		self._thread.start()
+
+	def _turn_zones_succeeded(self, loaded: LoadedDataset) -> None:
+		self.session.publish_loaded_dataset(loaded)
+		self._populate_zone_list(loaded)
+		self.prepare_turn_zones_button.setEnabled(True)
+		self.prepare_turn_zones_button.setText("Regenerate zones with selected track")
+		track_name = self.session.config.dataset.track_name if self.session.config.dataset else ""
+		detected_tracks = sorted(
+			{run.track_name for run in self._source_loaded_dataset.runs if run.track_name}
+		) if self._source_loaded_dataset else []
+		detected_label = ", ".join(detected_tracks) if detected_tracks else "not specified"
+		self.detected_track_label.setText(
+			f"DXPX Header.TrackName: {detected_label}; zones use: {track_name}"
+		)
+		self.status_label.setText(
+			f"Turn zones prepared for {track_name}: {self.zone_list.count()} shared zone(s)"
+		)
+
 	def _operation_failed(self, message: str) -> None:
 		self.session.fail(message)
+		self.prepare_turn_zones_button.setEnabled(self._source_loaded_dataset is not None)
 		self.status_label.setText(f"Operation failed: {message}")
 
 	def _operation_cancelled(self) -> None:
 		self.session.complete_cancellation()
+		self.prepare_turn_zones_button.setEnabled(self._source_loaded_dataset is not None)
 		self.status_label.setText("Operation cancelled; previous results are preserved")
 
 	def _worker_finished(self) -> None:
@@ -432,6 +582,11 @@ class MainWindow(QMainWindow):
 			turn_zone_operator=self.zone_operator.currentText(),
 			category_operator=self.category_operator.currentText(),
 		)
+		try:
+			self.session.config.baseline = self._baseline_config()
+		except ValueError as error:
+			self.status_label.setText(str(error))
+			return
 		plot_type = self.plot_combo.currentData()
 		if plot_type == "suggested":
 			roles = {variable.role for variable in self.session.config.sweep_variables}
@@ -500,6 +655,84 @@ class MainWindow(QMainWindow):
 		self.figure_canvas.draw()
 		self.results_label.setText(f"{output.metric_name}: {len(output.rows)} analyzed run(s)")
 		self._populate_results_table(output)
+		self._populate_comparison_table(output)
+
+	def _baseline_mode_changed(self, *_args: object) -> None:
+		mode = self.baseline_combo.currentData()
+		for widget, visible in (
+			(self.baseline_run_combo, mode == "loaded_run"),
+			(self.external_baseline_button, mode == "external_study"),
+			(self.external_baseline_label, mode == "external_study"),
+			(self.external_laps_edit, mode == "external_study"),
+			(self.baseline_delta_combo, mode != "none"),
+		):
+			widget.setVisible(visible)
+			label = self.analysis_form.labelForField(widget)
+			if label is not None:
+				label.setVisible(visible)
+
+	def _choose_external_baseline(self) -> None:
+		path, _ = QFileDialog.getOpenFileName(
+			self,
+			"Select external baseline DXPX file",
+			"",
+			"DXPX files (*.dXpx *.DXPX)",
+		)
+		if not path:
+			return
+		self._external_baseline_path = Path(path)
+		self._set_path_label(self.external_baseline_label, self._external_baseline_path)
+
+	def _baseline_config(self) -> BaselineConfig:
+		mode = self.baseline_combo.currentData()
+		if mode == "none":
+			return BaselineConfig()
+		delta_mode = self.baseline_delta_combo.currentData()
+		if mode == "loaded_run":
+			run_index = self.baseline_run_combo.currentData()
+			if run_index is None:
+				raise ValueError("Select a loaded run for the baseline")
+			return BaselineConfig(mode=mode, run_index=int(run_index), delta_mode=delta_mode)
+		if self._external_baseline_path is None:
+			raise ValueError("Choose an external baseline DXPX file")
+		try:
+			lap_indices = tuple(int(value.strip()) for value in self.external_laps_edit.text().split(","))
+		except ValueError as error:
+			raise ValueError("Lap indices must be comma-separated zero-based integers") from error
+		return BaselineConfig(
+			mode=mode,
+			external_path=self._external_baseline_path,
+			lap_indices=lap_indices,
+			delta_mode=delta_mode,
+		)
+
+	def _populate_comparison_table(self, output: AnalysisOutput) -> None:
+		if not output.compared_rows:
+			self.comparison_table.clear()
+			self.comparison_table.setRowCount(0)
+			self.comparison_table.setColumnCount(0)
+			return
+		paths = [variable.path for variable in self.session.config.sweep_variables]
+		delta_header = "Delta (%)" if self.session.config.baseline.delta_mode == "percent" else "Delta"
+		headers = paths + ["Run", "Metric", "Baseline", delta_header]
+		self.comparison_table.setColumnCount(len(headers))
+		self.comparison_table.setHorizontalHeaderLabels(headers)
+		self.comparison_table.setRowCount(len(output.compared_rows))
+		for row_index, compared in enumerate(output.compared_rows):
+			row = compared.row
+			for column, path in enumerate(paths):
+				self.comparison_table.setItem(
+					row_index, column, QTableWidgetItem(f"{row.sweep_values[path]:g}")
+				)
+			self.comparison_table.setItem(row_index, len(paths), QTableWidgetItem(str(row.run_index)))
+			self.comparison_table.setItem(
+				row_index, len(paths) + 1, QTableWidgetItem(f"{row.metric_result.value:.6g}")
+			)
+			self.comparison_table.setItem(
+				row_index, len(paths) + 2, QTableWidgetItem(f"{compared.baseline.value:.6g}")
+			)
+			delta = f"{compared.delta:.6g}" if compared.baseline_valid else "Invalid"
+			self.comparison_table.setItem(row_index, len(paths) + 3, QTableWidgetItem(delta))
 
 	def _populate_results_table(self, output: AnalysisOutput) -> None:
 		paths = [variable.path for variable in self.session.config.sweep_variables]

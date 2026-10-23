@@ -8,9 +8,16 @@ from typing import Callable
 
 from ..dxpx import DXPXRun, load_dxpx
 from ..analysis import analyze_runs
-from ..config import AnalysisConfig, PlotConfig
+from ..config import AnalysisConfig, BaselineConfig, PlotConfig
 from ..plot_data import build_plot_data
-from ..results import build_grid, join_sweep_variables
+from ..results import (
+	ComparedRow,
+	analyze_baseline,
+	build_grid,
+	compare_rows_to_baseline,
+	join_sweep_variables,
+	resolve_baseline_laps,
+)
 from ..metric import Metric, default_metrics
 from ..turn_zones import add_turn_zones
 from .discovery import DiscoveryResult
@@ -33,6 +40,7 @@ class AnalysisOutput:
 	grid: object
 	plot_data: object
 	metric_name: str
+	compared_rows: tuple[ComparedRow, ...] = ()
 
 
 def analyze_loaded_dataset(
@@ -59,6 +67,33 @@ def analyze_loaded_dataset(
 		progress("Joining sweep coordinates", 2, 3)
 	rows = join_sweep_variables(loaded.runs, results, variables)
 	grid = build_grid(rows, variable_paths=[variable.path for variable in variables])
+	compared_rows: tuple[ComparedRow, ...] = ()
+	if config.baseline.mode != "none":
+		baseline_laps = resolve_baseline_laps(config.baseline, sweep_runs=loaded.runs)
+		if config.filters.turn_zones:
+			if any(not lap.turn_zone_names for lap in baseline_laps):
+				if config.dataset is None or config.dataset.circuit_workbook is None:
+					raise ValueError("A circuit workbook is required to prepare baseline turn zones")
+				if not config.dataset.track_name:
+					raise ValueError("Confirm a circuit before generating baseline turn zones")
+				baseline_laps = [
+					add_turn_zones(
+						lap,
+						config.dataset.circuit_workbook,
+						track_name=config.dataset.track_name,
+					)
+					if not lap.turn_zone_names
+					else lap
+					for lap in baseline_laps
+				]
+		baseline = analyze_baseline(
+			baseline_laps,
+			loaded.metrics[metric_name],
+			config.filters,
+		)
+		compared_rows = tuple(
+			compare_rows_to_baseline(rows, baseline, config.baseline.delta_mode)
+		)
 	plot = _plot_config_from_roles(config, metric_name)
 	if progress:
 		progress("Building plot data", 3, 3)
@@ -67,6 +102,7 @@ def analyze_loaded_dataset(
 		grid=grid,
 		plot_data=build_plot_data(grid, plot),
 		metric_name=metric_name,
+		compared_rows=compared_rows,
 	)
 
 
@@ -98,7 +134,7 @@ def load_dataset(
 	is_cancelled: Callable[[], bool] = lambda: False,
 	progress: Callable[[str, int, int], None] | None = None,
 ) -> LoadedDataset:
-	"""Load discovered DXPX runs and prepare missing turn-zone masks."""
+	"""Load discovered DXPX runs without generating turn-zone masks."""
 
 	if discovery.dxpx_directory is None:
 		raise FileNotFoundError("No DXPX directory was discovered")
@@ -118,11 +154,10 @@ def load_dataset(
 			progress("Loading simulation runs", index - 1, len(files))
 		try:
 			run = load_dxpx(path)
-			if not run.turn_zone_names and discovery.circuit_workbook is not None:
-				run = add_turn_zones(run, discovery.circuit_workbook)
-			runs.append(run)
 		except Exception as error:
 			diagnostics.append(f"Run {path.parent.name} could not be loaded: {error}")
+			continue
+		runs.append(run)
 	if progress:
 		progress("Checking available metrics", len(files), len(files))
 
@@ -139,3 +174,24 @@ def load_dataset(
 	else:
 		diagnostics.append("No simulation runs were loaded")
 	return LoadedDataset(tuple(runs), metrics, tuple(diagnostics))
+
+
+def prepare_turn_zones(
+	loaded: LoadedDataset,
+	workbook_path: Path,
+	track_name: str,
+) -> LoadedDataset:
+	"""Add missing zone masks using the circuit explicitly confirmed by the user."""
+
+	diagnostics = list(loaded.diagnostics)
+	runs: list[DXPXRun] = []
+	for run in loaded.runs:
+		if run.turn_zone_names:
+			runs.append(run)
+			continue
+		try:
+			runs.append(add_turn_zones(run, workbook_path, track_name=track_name))
+		except Exception as error:
+			diagnostics.append(f"Run {run.path.parent.name} turn zones could not be prepared: {error}")
+			runs.append(run)
+	return LoadedDataset(tuple(runs), loaded.metrics, tuple(diagnostics))

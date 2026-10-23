@@ -7,6 +7,10 @@ from pathlib import Path
 
 from ..exploration import ExplorationDefinition, SweepVariable, discover_job_variables, load_exploration_definition
 
+CENTRAL_CIRCUIT_WORKBOOK = Path(
+	r"C:\Bib\Git\CanopyExplorationProcessor\CircuitsData_Canopy_Hypercar.xlsx"
+)
+
 
 @dataclass(frozen=True)
 class DiscoveryResult:
@@ -45,9 +49,9 @@ def discover_dataset(root: str | Path) -> DiscoveryResult:
 	if raw_directory is None:
 		diagnostics.append("No numbered raw job folders were found below the selected root")
 
-	workbook = _find_workbook(root_path)
-	if workbook is None:
-		diagnostics.append("No circuit workbook was discovered")
+	workbook = _find_workbook()
+	if not workbook.is_file():
+		diagnostics.append(f"Central circuit workbook was not found: {workbook}")
 
 	exploration = None
 	variables: tuple[SweepVariable, ...] = ()
@@ -108,14 +112,10 @@ def _has_indexed_dxpx_runs(path: Path) -> bool:
 	)
 
 
-def _find_workbook(path: Path) -> Path | None:
-	"""Find the circuit workbook at or above the selected study."""
+def _find_workbook() -> Path:
+	"""Return the centrally maintained circuit workbook path."""
 
-	for parent in (path, *path.parents):
-		matches = sorted(parent.glob("CircuitsData_*.xlsx"))
-		if matches:
-			return matches[0]
-	return None
+	return CENTRAL_CIRCUIT_WORKBOOK
 
 
 def _find_directory(root: Path, *names: str) -> Path | None:

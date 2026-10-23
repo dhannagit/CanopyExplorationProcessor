@@ -26,9 +26,10 @@ def test_main_window_builds_workbench() -> None:
 	assert window.root_label.text() == "No root selected"
 	assert window.metric_combo.count() == 1
 	assert window.minimumSize().width() == 900
-	analysis_scroll = window.findChild(QScrollArea, "analysisScroll")
-	assert analysis_scroll is not None
-	assert analysis_scroll.maximumWidth() > 360
+	window.resize(1920, 1200)
+	window.show()
+	application.processEvents()
+	assert not isinstance(window.workspace_tabs.widget(0), QScrollArea)
 	assert window.workspace_tabs.count() == 3
 	assert [window.workspace_tabs.tabText(index) for index in range(3)] == [
 		"Analysis", "Results", "Comparison"
@@ -41,6 +42,18 @@ def test_main_window_builds_workbench() -> None:
 		"analysisSettingsGroup",
 	):
 		assert window.findChild(QGroupBox, object_name) is not None
+	assert window.variable_list.height() > 100
+	assert window.phase_list.height() > 80
+	assert window.zone_list.height() > 100
+	variable_width_at_1920 = window.variable_list.width()
+	zone_height_at_1920 = window.zone_list.height()
+	window.resize(2560, 1440)
+	application.processEvents()
+	assert window.variable_list.width() > variable_width_at_1920
+	assert window.zone_list.height() > zone_height_at_1920
+	long_path = Path("C:/") / "/".join(["long-study-folder"] * 8)
+	window._set_path_label(window.raw_label, long_path)
+	assert window.raw_label.text() == str(long_path)
 
 	window.close()
 	application.processEvents()

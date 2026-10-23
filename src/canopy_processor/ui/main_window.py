@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 	QMainWindow,
 	QProgressBar,
 	QPushButton,
-	QScrollArea,
+	QSizePolicy,
 	QTabWidget,
 	QTableWidget,
 	QTableWidgetItem,
@@ -89,10 +89,6 @@ class MainWindow(QMainWindow):
 		self._build_status_dock()
 
 	def _build_controls(self) -> QWidget:
-		scroll = QScrollArea()
-		scroll.setObjectName("analysisScroll")
-		scroll.setWidgetResizable(True)
-		scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 		panel = QWidget()
 		layout = QVBoxLayout(panel)
 
@@ -107,6 +103,7 @@ class MainWindow(QMainWindow):
 		top_row = QHBoxLayout()
 		dataset = QGroupBox("Dataset")
 		dataset.setObjectName("datasetGroup")
+		dataset.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 		dataset_form = QFormLayout(dataset)
 		self.root_label = QLabel("No root selected")
 		self.root_label.setObjectName("muted")
@@ -132,13 +129,15 @@ class MainWindow(QMainWindow):
 
 		variables = QGroupBox("Sweep variables")
 		variables.setObjectName("sweepVariablesGroup")
+		variables.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 		variables_layout = QVBoxLayout(variables)
 		self.variable_list = QTableWidget(0, 2)
 		self.variable_list.setHorizontalHeaderLabels(["Variable", "Role"])
 		self.variable_list.setSelectionBehavior(QAbstractItemView.SelectRows)
 		self.variable_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
 		self.variable_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
-		self.variable_list.setMinimumHeight(130)
+		self.variable_list.setMinimumHeight(100)
+		self.variable_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 		self.variable_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
 		self.variable_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 		variables_layout.addWidget(self.variable_list)
@@ -147,18 +146,21 @@ class MainWindow(QMainWindow):
 		self.confirm_button.clicked.connect(self._confirm_variables)
 		variables_layout.addWidget(self.confirm_button)
 		top_row.addWidget(variables, 1)
-		layout.addLayout(top_row)
+		layout.addLayout(top_row, 2)
 
 		bottom_row = QHBoxLayout()
 		phases = QGroupBox("Phases")
 		phases.setObjectName("phaseFiltersGroup")
+		phases.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 		phases_form = QFormLayout(phases)
 		zones = QGroupBox("Turn zones")
 		zones.setObjectName("turnZonesGroup")
+		zones.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 		zones_form = QFormLayout(zones)
 		self.turn_zone_form = zones_form
 		analysis = QGroupBox("Analysis settings")
 		analysis.setObjectName("analysisSettingsGroup")
+		analysis.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 		analysis_layout = QVBoxLayout(analysis)
 		analysis_form = QFormLayout()
 		analysis_layout.addLayout(analysis_form)
@@ -187,11 +189,12 @@ class MainWindow(QMainWindow):
 		self._external_baseline_path: Path | None = None
 		self.phase_list = QListWidget()
 		self.phase_list.setSelectionMode(QAbstractItemView.NoSelection)
-		self.phase_list.setMaximumHeight(70)
+		self.phase_list.setMinimumHeight(80)
+		self.phase_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 		self.zone_list = QListWidget()
 		self.zone_list.setSelectionMode(QAbstractItemView.NoSelection)
 		self.zone_list.setMinimumHeight(100)
-		self.zone_list.setMaximumHeight(140)
+		self.zone_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 		self.phase_operator = QComboBox()
 		self.phase_operator.addItems(["or", "and"])
 		self.zone_operator = QComboBox()
@@ -227,12 +230,10 @@ class MainWindow(QMainWindow):
 		bottom_row.addWidget(phases, 1)
 		bottom_row.addWidget(zones, 1)
 		bottom_row.addWidget(analysis, 1)
-		layout.addLayout(bottom_row)
-		layout.addStretch()
+		layout.addLayout(bottom_row, 3)
 		self._baseline_mode_changed()
 		self._set_track_controls_visible(False)
-		scroll.setWidget(panel)
-		return scroll
+		return panel
 
 	def _build_results(self) -> QWidget:
 		panel = QWidget()
@@ -372,10 +373,10 @@ class MainWindow(QMainWindow):
 		self.status_label.setText("Manual DXPX path selected; review and confirm")
 
 	def _set_path_label(self, label: QLabel, path: Path | None) -> None:
-		"""Show a compact path while retaining the complete value on hover."""
+		"""Show the complete path in the wrapping label and its tooltip."""
 
 		text = str(path) if path else "Not detected"
-		label.setText(text if len(text) <= 46 else f"...{text[-43:]}")
+		label.setText(text)
 		label.setToolTip(text)
 
 	def _discovery_status(self, result: DiscoveryResult) -> str:

@@ -401,6 +401,18 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Manually review path readability and group sizing at standard desktop resolutions and display scaling.
 
+## 2026-10-23 - Expand Analysis controls with the window
+
+**Goal:** Improve the three-tab Analysis page after review showed unused space on large displays and paths that were still truncated.
+
+**Changed:** Removed the Analysis page's scroll wrapper and fixed list-height caps. Dataset, Sweep variables, Phases, Turn zones, and Analysis settings now expand with available window dimensions, with proportionally more height for the lower configuration row. Dataset paths are displayed in full and wrap within their labels.
+
+**Decisions:** Keep the existing two-row, five-group Analysis structure and let Qt's expanding size policies use the available space rather than adding further navigation or scroll behavior.
+
+**Evidence:** GUI geometry tests verify the variable table widens and the turn-zone list grows between 1920x1200 and 2560x1440. Long paths remain untruncated. Main-window integration tests pass with 6 tests; full suite passes with 68 tests.
+
+**Next:** Manually review the expanded layout at additional Windows display-scaling settings.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

@@ -1,0 +1,4 @@
+include docs/DISTRIBUTION.md
+include docs/DECISIONS.md
+include docs/BUILD_LOG.md
+recursive-include installer *.ps1 *.bat *.iss

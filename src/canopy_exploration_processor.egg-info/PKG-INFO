@@ -12,3 +12,6 @@ Provides-Extra: gui
 Requires-Dist: PySide6>=6.8; extra == "gui"
 Provides-Extra: test
 Requires-Dist: pytest>=8; extra == "test"
+Provides-Extra: release
+Requires-Dist: build>=1.2; extra == "release"
+Requires-Dist: twine>=6; extra == "release"

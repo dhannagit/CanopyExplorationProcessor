@@ -413,6 +413,36 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Manually review the expanded layout at additional Windows display-scaling settings.
 
+## 2026-10-23 - Windows distribution implementation
+
+**Goal:** Start team distribution following DataConverter's corporate tooling and
+Artifactory model, with independently maintained shared circuit resources.
+
+**Changed:** Added File > Settings with isolated per-user folder preferences and
+workbook validation; explicit workbook input to discovery; console-free entry
+point, rotating GUI logs and installed-release smoke check; hashed runtime lock;
+release build/manifest command; staged Windows setup/update/rollback/removal
+controller and batch launchers; Inno Setup recipe and distribution documentation.
+
+**Decisions:** Windows x64/Python 3.13; stable automatic updates; no TLS bypasses or
+forced process termination; active release changes only after candidate validation;
+rollback pauses updates until the manual updater runs. Shared workbooks and user
+data are never installer payloads or uninstall targets.
+
+**Evidence:** 37 fixture-independent regression tests passed. Following Unicode
+path changes, all 11 deployment/settings tests passed again. Built wheel and source
+archive; installed the wheel with its hashed dependencies in a fresh Python 3.13.14
+environment, ran dependency compatibility checks and constructed/drew the Qt GUI
+outside the checkout. Real deployment-controller setup, no-op update and removal
+passed against the locally built wheel in a temporary installation. Editor checks
+reported no errors in changed GUI modules.
+
+**Next:** Inno Setup is not installed on the build machine, so the installer recipe
+has not been compiled or exercised. Obtain approved compiler/signing and Artifactory
+publishing access, validate on a teammate's normal Windows account, and provision
+the external sample datasets for full numerical/GUI regression testing. No release
+has been published and no production installation was modified.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

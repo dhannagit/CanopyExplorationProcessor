@@ -9,7 +9,7 @@ TRACK_TEMP_STUDY = REPOSITORY_ROOT / "DATA_Raw" / "MOS_COR_TrackTempSweep"
 
 
 def test_discover_dataset_finds_sample_sources() -> None:
-	result = discover_dataset(SAMPLE_RAW_STUDY)
+	result = discover_dataset(SAMPLE_RAW_STUDY, REPOSITORY_ROOT / "CircuitsData_Canopy_Hypercar.xlsx")
 
 	assert result.dxpx_directory == REPOSITORY_ROOT / "DATA_dXpx" / "MOS_COR_TyrePressureExploration"
 	assert result.raw_directory == REPOSITORY_ROOT / "DATA_Raw" / "MOS_COR_TyrePressureExploration"
@@ -39,12 +39,21 @@ def test_discover_dataset_matches_worksheet_study_layout(tmp_path: Path) -> None
 	assert result.dxpx_candidates == (dxpx,)
 
 
-def test_discovery_always_uses_central_circuit_workbook(tmp_path: Path) -> None:
+def test_discovery_requires_explicit_circuit_workbook(tmp_path: Path) -> None:
 	(tmp_path / "CircuitsData_Local.xlsx").write_bytes(b"local workbook")
 	result = discover_dataset(tmp_path)
 
-	assert result.circuit_workbook == REPOSITORY_ROOT / "CircuitsData_Canopy_Hypercar.xlsx"
-	assert not any("No circuit workbook" in item for item in result.diagnostics)
+	assert result.circuit_workbook is None
+	assert any("File > Settings" in item for item in result.diagnostics)
+	workbook = tmp_path / "shared" / "CircuitsData_Canopy_Hypercar.xlsx"
+	result = discover_dataset(tmp_path, workbook)
+	assert result.circuit_workbook == workbook
+	assert any("Circuit workbook unavailable" in item for item in result.diagnostics)
+	workbook.parent.mkdir()
+	workbook.write_bytes(b"configured workbook")
+	result = discover_dataset(tmp_path, workbook)
+	assert result.circuit_workbook == workbook
+	assert not any("workbook" in item.lower() for item in result.diagnostics)
 
 
 def test_discover_track_temperature_variables() -> None:

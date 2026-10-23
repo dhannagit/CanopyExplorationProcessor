@@ -7,11 +7,6 @@ from pathlib import Path
 
 from ..exploration import ExplorationDefinition, SweepVariable, discover_job_variables, load_exploration_definition
 
-CENTRAL_CIRCUIT_WORKBOOK = Path(
-	r"C:\Bib\Git\CanopyExplorationProcessor\CircuitsData_Canopy_Hypercar.xlsx"
-)
-
-
 @dataclass(frozen=True)
 class DiscoveryResult:
 	"""Resolved source locations and candidate variables for one root."""
@@ -26,7 +21,7 @@ class DiscoveryResult:
 	dxpx_candidates: tuple[Path, ...] = ()
 
 
-def discover_dataset(root: str | Path) -> DiscoveryResult:
+def discover_dataset(root: str | Path, circuit_workbook: str | Path | None = None) -> DiscoveryResult:
 	"""Discover one raw study and its matching DXPX study directory.
 
 	The selected path is expected to be a single ``StudyName`` directory,
@@ -49,9 +44,11 @@ def discover_dataset(root: str | Path) -> DiscoveryResult:
 	if raw_directory is None:
 		diagnostics.append("No numbered raw job folders were found below the selected root")
 
-	workbook = _find_workbook()
-	if not workbook.is_file():
-		diagnostics.append(f"Central circuit workbook was not found: {workbook}")
+	workbook = Path(circuit_workbook).expanduser().resolve() if circuit_workbook else None
+	if workbook is None:
+		diagnostics.append("Configure the circuit workbook folder in File > Settings")
+	elif not workbook.is_file():
+		diagnostics.append(f"Circuit workbook unavailable: {workbook}. Check File > Settings and OneDrive sync.")
 
 	exploration = None
 	variables: tuple[SweepVariable, ...] = ()
@@ -110,12 +107,6 @@ def _has_indexed_dxpx_runs(path: Path) -> bool:
 		if folder.is_dir() and folder.name.isdigit()
 		for file in folder.iterdir()
 	)
-
-
-def _find_workbook() -> Path:
-	"""Return the centrally maintained circuit workbook path."""
-
-	return CENTRAL_CIRCUIT_WORKBOOK
 
 
 def _find_directory(root: Path, *names: str) -> Path | None:

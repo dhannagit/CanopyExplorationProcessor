@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -11,10 +12,19 @@ from canopy_processor.ui.main_window import MainWindow
 from canopy_processor.ui.pipeline import LoadedDataset
 from canopy_processor.ui.discovery import DiscoveryResult
 from canopy_processor import SweepVariable
+from canopy_processor.ui.settings import RESOURCE_DIRECTORY_KEY
+from PySide6.QtCore import QSettings
 
 
 REPOSITORY_ROOT = os.path.dirname(os.path.dirname(__file__))
 SAMPLE_RAW_STUDY = os.path.join(REPOSITORY_ROOT, "DATA_Raw", "MOS_COR_TyrePressureExploration")
+
+
+@pytest.fixture(autouse=True)
+def isolated_settings(monkeypatch, tmp_path):
+	settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+	settings.setValue(RESOURCE_DIRECTORY_KEY, REPOSITORY_ROOT)
+	monkeypatch.setattr("canopy_processor.ui.main_window.create_settings", lambda: settings)
 
 
 def test_main_window_builds_workbench() -> None:
@@ -266,7 +276,7 @@ def test_new_raw_study_selection_rediscoveries_variables(monkeypatch, tmp_path: 
 	first_variable = SweepVariable("setup.first", "bar", (1.0,))
 	second_variable = SweepVariable("setup.second", "deg", (2.0,))
 
-	def fake_discovery(path: str) -> DiscoveryResult:
+	def fake_discovery(path: str, circuit_workbook: Path | None = None) -> DiscoveryResult:
 		variable = first_variable if Path(path) == first else second_variable
 		return DiscoveryResult(Path(path), Path(path) / "dxpx", Path(path), None, (variable,), None, ())
 

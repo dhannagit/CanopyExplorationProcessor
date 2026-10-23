@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
 	QComboBox,
 	QAbstractItemView,
 	QDockWidget,
+	QDialog,
 	QFileDialog,
 	QFormLayout,
 	QGroupBox,
@@ -43,6 +44,8 @@ from .pipeline import (
 from ..turn_zones import list_circuit_names
 from ..plotting import render_plot_data
 from .session import AnalysisSession, SessionState
+from .settings import RESOURCE_DIRECTORY_KEY, circuit_workbook, create_settings
+from .settings_dialog import SettingsDialog
 from .worker import CancellationToken, Worker, start_worker
 
 
@@ -64,8 +67,9 @@ QProgressBar::chunk { background: #20a8bd; }
 class MainWindow(QMainWindow):
 	"""Plotting workbench shell; numerical workers will attach to its session."""
 
-	def __init__(self) -> None:
+	def __init__(self, settings: QSettings | None = None) -> None:
 		super().__init__()
+		self.settings = settings if settings is not None else create_settings()
 		self.session = AnalysisSession()
 		self._thread = None
 		self._worker: Worker | None = None
@@ -75,6 +79,15 @@ class MainWindow(QMainWindow):
 		self.resize(1100, 700)
 		self.setStyleSheet(STYLE)
 		self._build_ui()
+		file_menu = self.menuBar().addMenu("File")
+		file_menu.addAction("Settings...", self._open_settings)
+
+	def _open_settings(self) -> None:
+		dialog = SettingsDialog(self.settings.value(RESOURCE_DIRECTORY_KEY, "", type=str), self)
+		if dialog.exec() == QDialog.DialogCode.Accepted:
+			self.settings.setValue(RESOURCE_DIRECTORY_KEY, dialog.resource_directory)
+			self.settings.sync()
+			self.status_label.setText("Settings saved; circuit folder changes apply to the next study load")
 
 	def _build_ui(self) -> None:
 		root = QWidget()
@@ -291,11 +304,13 @@ class MainWindow(QMainWindow):
 			self._start_discovery(path)
 
 	def _start_discovery(self, path: str) -> None:
+		workbook = circuit_workbook(self.settings.value(RESOURCE_DIRECTORY_KEY, "", type=str))
+
 		def operation(token: CancellationToken, progress: object) -> DiscoveryResult:
 			progress("Scanning source folders", 1, 2)
 			if token.cancelled:
 				return None
-			result = discover_dataset(path)
+			result = discover_dataset(path, workbook)
 			progress("Reading sweep metadata", 2, 2)
 			return result
 
@@ -338,6 +353,7 @@ class MainWindow(QMainWindow):
 			self.variable_list.setItem(0, 0, QTableWidgetItem("No numeric sweep variables found"))
 		self.confirm_button.setEnabled(bool(result.variables) and result.dxpx_directory is not None and result.raw_directory is not None)
 		self.status_label.setText(self._discovery_status(result))
+		self.status_label.setToolTip("\n".join(result.diagnostics))
 
 	def _update_config_role(self, row: int, role: str) -> None:
 		"""Keep visible role edits synchronized after variable confirmation."""
@@ -475,7 +491,10 @@ class MainWindow(QMainWindow):
 				self._set_track_controls_visible(False)
 		self.zone_list.setEnabled(self.zone_list.count() > 0)
 		if not self.zone_list.count():
-			self.zone_list.setToolTip("Confirm a circuit above to generate turn-zone masks")
+			if self.session.config.dataset is None or self.session.config.dataset.circuit_workbook is None:
+				self.zone_list.setToolTip("Configure the circuit folder in File > Settings, then reload the study")
+			else:
+				self.zone_list.setToolTip("Confirm a circuit above to generate turn-zone masks")
 		self.baseline_run_combo.clear()
 		for run in loaded.runs:
 			self.baseline_run_combo.addItem(f"Run {run.path.parent.name}", int(run.path.parent.name))

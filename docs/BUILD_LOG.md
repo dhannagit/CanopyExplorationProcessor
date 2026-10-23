@@ -391,6 +391,16 @@ This is the chronological engineering record for the Python migration. Keep entr
 
 **Next:** Manually confirm checkbox hit targets and scrolling on the standard desktop layout.
 
+## 2026-10-23 - Move controls into a three-tab workspace
+
+**Goal:** Reduce clutter by replacing the narrow control rail and nested Results/Comparison tabs with three full-width workspace tabs.
+
+**Changed:** `main_window.py` now has top-level Analysis, Results, and Comparison tabs. Analysis places Dataset and Sweep variables side by side in the first row, then Phases, Turn zones, and Analysis settings side by side in the second row. The Analysis page can scroll vertically without the former 360-pixel rail-width cap; sweep-variable columns use available width.
+
+**Evidence:** Main-window integration tests pass with 6 tests; full suite passes with 68 tests.
+
+**Next:** Manually review path readability and group sizing at standard desktop resolutions and display scaling.
+
 ## Logging Checklist
 
 For each future milestone, append one dated entry with:

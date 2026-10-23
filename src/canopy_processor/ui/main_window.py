@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 	QFormLayout,
 	QGroupBox,
 	QHBoxLayout,
+	QHeaderView,
 	QLabel,
 	QListWidget,
 	QListWidgetItem,
@@ -77,24 +78,22 @@ class MainWindow(QMainWindow):
 
 	def _build_ui(self) -> None:
 		root = QWidget()
-		layout = QHBoxLayout(root)
+		layout = QVBoxLayout(root)
 		layout.setContentsMargins(14, 14, 14, 14)
-		controls_scroll = QScrollArea()
-		controls_scroll.setObjectName("controlsScroll")
-		controls_scroll.setWidgetResizable(True)
-		controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-		controls_scroll.setWidget(self._build_controls())
-		controls_scroll.setMinimumWidth(285)
-		controls_scroll.setMaximumWidth(360)
-		layout.addWidget(controls_scroll, 0)
-		layout.addWidget(self._build_results(), 1)
+		self.workspace_tabs = QTabWidget()
+		self.workspace_tabs.addTab(self._build_controls(), "Analysis")
+		self.workspace_tabs.addTab(self._build_results(), "Results")
+		self.workspace_tabs.addTab(self._build_comparison(), "Comparison")
+		layout.addWidget(self.workspace_tabs)
 		self.setCentralWidget(root)
 		self._build_status_dock()
 
 	def _build_controls(self) -> QWidget:
+		scroll = QScrollArea()
+		scroll.setObjectName("analysisScroll")
+		scroll.setWidgetResizable(True)
+		scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 		panel = QWidget()
-		panel.setMinimumWidth(265)
-		panel.setMaximumWidth(340)
 		layout = QVBoxLayout(panel)
 
 		title = QLabel("EXPLORATION PROCESSOR")
@@ -105,7 +104,9 @@ class MainWindow(QMainWindow):
 		intro.setWordWrap(True)
 		layout.addWidget(intro)
 
+		top_row = QHBoxLayout()
 		dataset = QGroupBox("Dataset")
+		dataset.setObjectName("datasetGroup")
 		dataset_form = QFormLayout(dataset)
 		self.root_label = QLabel("No root selected")
 		self.root_label.setObjectName("muted")
@@ -127,9 +128,10 @@ class MainWindow(QMainWindow):
 		self.choose_dxpx_button.setEnabled(False)
 		self.choose_dxpx_button.clicked.connect(self._choose_dxpx)
 		dataset_form.addRow(self.choose_dxpx_button)
-		layout.addWidget(dataset)
+		top_row.addWidget(dataset, 1)
 
 		variables = QGroupBox("Sweep variables")
+		variables.setObjectName("sweepVariablesGroup")
 		variables_layout = QVBoxLayout(variables)
 		self.variable_list = QTableWidget(0, 2)
 		self.variable_list.setHorizontalHeaderLabels(["Variable", "Role"])
@@ -137,15 +139,29 @@ class MainWindow(QMainWindow):
 		self.variable_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
 		self.variable_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
 		self.variable_list.setMinimumHeight(130)
+		self.variable_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+		self.variable_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 		variables_layout.addWidget(self.variable_list)
 		self.confirm_button = QPushButton("Confirm variables")
 		self.confirm_button.setEnabled(False)
 		self.confirm_button.clicked.connect(self._confirm_variables)
 		variables_layout.addWidget(self.confirm_button)
-		layout.addWidget(variables)
+		top_row.addWidget(variables, 1)
+		layout.addLayout(top_row)
 
-		analysis = QGroupBox("Analysis")
-		analysis_form = QFormLayout(analysis)
+		bottom_row = QHBoxLayout()
+		phases = QGroupBox("Phases")
+		phases.setObjectName("phaseFiltersGroup")
+		phases_form = QFormLayout(phases)
+		zones = QGroupBox("Turn zones")
+		zones.setObjectName("turnZonesGroup")
+		zones_form = QFormLayout(zones)
+		self.turn_zone_form = zones_form
+		analysis = QGroupBox("Analysis settings")
+		analysis.setObjectName("analysisSettingsGroup")
+		analysis_layout = QVBoxLayout(analysis)
+		analysis_form = QFormLayout()
+		analysis_layout.addLayout(analysis_form)
 		self.analysis_form = analysis_form
 		self.metric_combo = QComboBox()
 		self.metric_combo.addItem("Select metric")
@@ -195,43 +211,47 @@ class MainWindow(QMainWindow):
 		analysis_form.addRow("Selected file:", self.external_baseline_label)
 		analysis_form.addRow("Lap indices (0-based):", self.external_laps_edit)
 		analysis_form.addRow("Comparison:", self.baseline_delta_combo)
-		analysis_form.addRow("Phases:", self.phase_list)
-		analysis_form.addRow("Phase logic:", self.phase_operator)
-		analysis_form.addRow("Detected track:", self.detected_track_label)
-		analysis_form.addRow("Track for zones:", self.turn_zone_track_combo)
-		analysis_form.addRow(self.prepare_turn_zones_button)
-		analysis_form.addRow("Turn zones:", self.zone_list)
-		analysis_form.addRow("Zone logic:", self.zone_operator)
+		phases_form.addRow("Select phases:", self.phase_list)
+		phases_form.addRow("Phase logic:", self.phase_operator)
+		zones_form.addRow("Detected track:", self.detected_track_label)
+		zones_form.addRow("Track for zones:", self.turn_zone_track_combo)
+		zones_form.addRow(self.prepare_turn_zones_button)
+		zones_form.addRow("Select zones:", self.zone_list)
+		zones_form.addRow("Zone logic:", self.zone_operator)
 		analysis_form.addRow("Category logic:", self.category_operator)
-		layout.addWidget(analysis)
 
 		self.apply_button = QPushButton("Apply / Analyze")
 		self.apply_button.setObjectName("applyButton")
 		self.apply_button.clicked.connect(self._begin_analysis)
-		layout.addWidget(self.apply_button)
+		analysis_layout.addWidget(self.apply_button)
+		bottom_row.addWidget(phases, 1)
+		bottom_row.addWidget(zones, 1)
+		bottom_row.addWidget(analysis, 1)
+		layout.addLayout(bottom_row)
 		layout.addStretch()
 		self._baseline_mode_changed()
 		self._set_track_controls_visible(False)
-		return panel
+		scroll.setWidget(panel)
+		return scroll
 
 	def _build_results(self) -> QWidget:
 		panel = QWidget()
 		layout = QVBoxLayout(panel)
-		tabs = QTabWidget()
-		results = QWidget()
-		results_layout = QVBoxLayout(results)
 		self.results_label = QLabel("Results canvas is ready for the first analysis.")
-		results_layout.addWidget(self.results_label)
+		layout.addWidget(self.results_label)
 		self.figure_canvas = FigureCanvasQTAgg()
 		self.figure_canvas.setMinimumHeight(300)
-		results_layout.addWidget(self.figure_canvas, 1)
+		layout.addWidget(self.figure_canvas, 1)
 		self.results_table = QTableWidget(0, 0)
 		self.results_table.setMinimumHeight(180)
-		results_layout.addWidget(self.results_table)
-		tabs.addTab(results, "Results")
+		layout.addWidget(self.results_table)
+		return panel
+
+	def _build_comparison(self) -> QWidget:
+		panel = QWidget()
+		layout = QVBoxLayout(panel)
 		self.comparison_table = QTableWidget(0, 0)
-		tabs.addTab(self.comparison_table, "Comparison")
-		layout.addWidget(tabs)
+		layout.addWidget(self.comparison_table)
 		return panel
 
 	def _build_status_dock(self) -> None:
@@ -497,7 +517,7 @@ class MainWindow(QMainWindow):
 			self.prepare_turn_zones_button,
 		):
 			widget.setVisible(visible)
-			label = self.analysis_form.labelForField(widget)
+			label = self.turn_zone_form.labelForField(widget)
 			if label is not None:
 				label.setVisible(visible)
 

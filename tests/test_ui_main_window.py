@@ -3,10 +3,9 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QFileDialog, QScrollArea
+from PySide6.QtWidgets import QApplication, QFileDialog, QGroupBox, QScrollArea
 from PySide6.QtCore import QPoint, Qt, QEventLoop, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtCore import QEventLoop, QTimer
 
 from canopy_processor.ui.main_window import MainWindow
 from canopy_processor.ui.pipeline import LoadedDataset
@@ -27,9 +26,21 @@ def test_main_window_builds_workbench() -> None:
 	assert window.root_label.text() == "No root selected"
 	assert window.metric_combo.count() == 1
 	assert window.minimumSize().width() == 900
-	controls_scroll = window.findChild(QScrollArea, "controlsScroll")
-	assert controls_scroll is not None
-	assert controls_scroll.maximumWidth() == 360
+	analysis_scroll = window.findChild(QScrollArea, "analysisScroll")
+	assert analysis_scroll is not None
+	assert analysis_scroll.maximumWidth() > 360
+	assert window.workspace_tabs.count() == 3
+	assert [window.workspace_tabs.tabText(index) for index in range(3)] == [
+		"Analysis", "Results", "Comparison"
+	]
+	for object_name in (
+		"datasetGroup",
+		"sweepVariablesGroup",
+		"phaseFiltersGroup",
+		"turnZonesGroup",
+		"analysisSettingsGroup",
+	):
+		assert window.findChild(QGroupBox, object_name) is not None
 
 	window.close()
 	application.processEvents()

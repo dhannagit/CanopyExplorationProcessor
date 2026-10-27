@@ -83,3 +83,14 @@ def test_render_plot_data_dispatches_by_type() -> None:
 	figure = render_plot_data(data, scatter=True)
 
 	assert len(figure.axes[0].collections) == 1
+
+
+def test_render_options_hide_annotations_and_use_labels() -> None:
+	data = build_heatmap_data(_grid().points, "x", "y")
+	figure = render_plot_data(data, annotate=False, labels={"x": "Pressure [bar]"})
+	assert not figure.axes[0].texts
+	assert figure.axes[0].get_xlabel() == "Pressure [bar]"
+	assert data.x_variable == "x"
+	facets = build_faceted_heatmap_data(_grid().points, "x", "y", ("facet",))
+	figure = render_plot_data(facets, annotate=False)
+	assert all(not axis.texts for axis in figure.axes)

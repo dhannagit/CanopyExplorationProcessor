@@ -8,8 +8,8 @@ from typing import Callable
 
 from ..dxpx import DXPXRun, load_dxpx
 from ..analysis import analyze_runs
-from ..config import AnalysisConfig, BaselineConfig, PlotConfig
-from ..plot_data import build_plot_data
+from ..config import AnalysisConfig
+from ..plot_data import build_plot_data, resolve_plot
 from ..results import (
 	ComparedRow,
 	analyze_baseline,
@@ -53,7 +53,8 @@ def analyze_loaded_dataset(
 
 	if not loaded.runs:
 		raise ValueError("No loaded runs are available for analysis")
-	metric_name = config.metrics[0] if config.metrics else next(iter(loaded.metrics), None)
+	config.validate_ready()
+	metric_name = config.metric
 	if not metric_name or metric_name not in loaded.metrics:
 		raise ValueError("Select a compatible metric before analysis")
 	selected_paths = {variable.path for variable in config.sweep_variables}
@@ -76,6 +77,11 @@ def analyze_loaded_dataset(
 					raise ValueError("A circuit workbook is required to prepare baseline turn zones")
 				if not config.dataset.track_name:
 					raise ValueError("Confirm a circuit before generating baseline turn zones")
+				if any(
+					lap.track_name != config.dataset.confirmed_header_track
+					for lap in baseline_laps if not lap.turn_zone_names
+				):
+					raise ValueError("Baseline track does not match the confirmed track; verify the baseline source")
 				baseline_laps = [
 					add_turn_zones(
 						lap,
@@ -94,7 +100,7 @@ def analyze_loaded_dataset(
 		compared_rows = tuple(
 			compare_rows_to_baseline(rows, baseline, config.baseline.delta_mode)
 		)
-	plot = _plot_config_from_roles(config, metric_name)
+	plot = resolve_plot(config.plot, config.sweep_variables)
 	if progress:
 		progress("Building plot data", 3, 3)
 	return AnalysisOutput(
@@ -103,29 +109,6 @@ def analyze_loaded_dataset(
 		plot_data=build_plot_data(grid, plot),
 		metric_name=metric_name,
 		compared_rows=compared_rows,
-	)
-
-
-def _plot_config_from_roles(config: AnalysisConfig, metric_name: str) -> PlotConfig:
-	"""Create the active plot configuration from selected variable roles."""
-
-	roles = {variable.role: variable.path for variable in config.sweep_variables}
-	x_variable = roles.get("x")
-	y_variable = roles.get("y")
-	facets = tuple(variable.path for variable in config.sweep_variables if variable.role == "facet")
-	color_variable = roles.get("color")
-	plot_type = config.plot.plot_type
-	if plot_type == "line" and not x_variable:
-		raise ValueError("Assign one selected sweep variable to the x role")
-	if plot_type in {"heatmap", "faceted_heatmap"} and (not x_variable or not y_variable):
-		raise ValueError("Heatmaps require selected x and y sweep variables")
-	return PlotConfig(
-		plot_type=plot_type,
-		x_variable=x_variable,
-		y_variable=y_variable,
-		facet_variables=facets,
-		color_variable=color_variable,
-		annotate=config.plot.annotate,
 	)
 
 

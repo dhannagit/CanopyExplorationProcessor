@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from copy import deepcopy
+from dataclasses import replace
+from hashlib import sha256
 
 from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
 	QComboBox,
+	QCheckBox,
 	QAbstractItemView,
 	QDockWidget,
 	QDialog,
@@ -21,6 +25,7 @@ from PySide6.QtWidgets import (
 	QListWidgetItem,
 	QLineEdit,
 	QMainWindow,
+	QMessageBox,
 	QProgressBar,
 	QPushButton,
 	QSizePolicy,
@@ -32,7 +37,8 @@ from PySide6.QtWidgets import (
 )
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
-from ..config import BaselineConfig, DatasetConfig, FilterConfig, SweepVariableConfig
+from ..config import AnalysisConfig, BaselineConfig, DatasetConfig, ExportConfig, FilterConfig, PlotConfig, SweepVariableConfig
+from ..exporting import export_analysis
 from .discovery import DiscoveryResult, discover_dataset
 from .pipeline import (
 	AnalysisOutput,
@@ -74,20 +80,332 @@ class MainWindow(QMainWindow):
 		self._thread = None
 		self._worker: Worker | None = None
 		self._source_loaded_dataset: LoadedDataset | None = None
+		self._applied_config: AnalysisConfig | None = None
+		self._analysis_config: AnalysisConfig | None = None
+		self._document_path: Path | None = None
+		self._restoring = False
+		self._after_worker = None
 		self.setWindowTitle("Canopy Exploration Processor")
 		self.setMinimumSize(900, 600)
 		self.resize(1100, 700)
 		self.setStyleSheet(STYLE)
 		self._build_ui()
 		file_menu = self.menuBar().addMenu("File")
+		self.open_action = file_menu.addAction("Open Analysis...", self._open_analysis)
+		self.open_action.setShortcut(QKeySequence.StandardKey.Open)
+		self.save_action = file_menu.addAction("Save", self._save_analysis)
+		self.save_action.setShortcut(QKeySequence.StandardKey.Save)
+		self.save_as_action = file_menu.addAction("Save As...", lambda: self._save_analysis(save_as=True))
+		self.save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
+		file_menu.addSeparator()
 		file_menu.addAction("Settings...", self._open_settings)
+		self._saved_snapshot = self._snapshot_config().to_dict()
+		for widget in self.findChildren(QLineEdit):
+			widget.textChanged.connect(self._document_changed)
+		for widget in self.findChildren(QComboBox):
+			widget.currentIndexChanged.connect(self._document_changed)
+		for widget in self.findChildren(QCheckBox):
+			widget.toggled.connect(self._document_changed)
+		self.phase_list.itemChanged.connect(self._document_changed)
+		self.zone_list.itemChanged.connect(self._document_changed)
 
 	def _open_settings(self) -> None:
+		if self._thread is not None:
+			return
 		dialog = SettingsDialog(self.settings.value(RESOURCE_DIRECTORY_KEY, "", type=str), self)
 		if dialog.exec() == QDialog.DialogCode.Accepted:
 			self.settings.setValue(RESOURCE_DIRECTORY_KEY, dialog.resource_directory)
 			self.settings.sync()
 			self.status_label.setText("Settings saved; circuit folder changes apply to the next study load")
+
+	@staticmethod
+	def _workbook_digest(path: Path | None) -> str | None:
+		return sha256(path.read_bytes()).hexdigest() if path and path.is_file() else None
+
+	@staticmethod
+	def _checked_names(widget: QListWidget) -> tuple[str, ...]:
+		return tuple(
+			widget.item(index).text() for index in range(widget.count())
+			if widget.item(index).checkState() == Qt.CheckState.Checked
+		)
+
+	def _snapshot_config(self) -> AnalysisConfig:
+		config = deepcopy(self.session.config)
+		config.name = self.analysis_name.text()
+		config.metric = self.metric_combo.currentData()
+		config.plot = PlotConfig(self.plot_combo.currentData(), self.annotate_checkbox.isChecked())
+		config.baseline = self._baseline_config()
+		config.filters = FilterConfig(
+			self._checked_names(self.phase_list), self._checked_names(self.zone_list),
+			self.phase_operator.currentText(), self.zone_operator.currentText(),
+			self.category_operator.currentText(),
+		)
+		config.export = ExportConfig(
+			Path(self.export_directory.text()).expanduser().resolve() if self.export_directory.text().strip() else None,
+			tuple(name for name, widget in (("svg", self.export_svg), ("png", self.export_png)) if widget.isChecked()),
+		)
+		result = self.session.discovery_result
+		if config.dataset is None and isinstance(result, DiscoveryResult):
+			config.dataset = DatasetConfig(result.dxpx_directory, result.raw_directory, result.circuit_workbook)
+		if config.dataset and not self.turn_zone_track_combo.isHidden():
+			track = self.turn_zone_track_combo.currentData()
+			if track != config.dataset.track_name:
+				config.dataset.confirmed_header_track = None
+				config.dataset.confirmed_workbook_digest = None
+			config.dataset.track_name = track
+		configured = {variable.path: variable for variable in config.sweep_variables}
+		for row, discovered in enumerate(self.session.discovered_variables):
+			variable = configured.get(discovered.path)
+			if variable is None:
+				continue
+			role = self.variable_list.cellWidget(row, 1)
+			label = self.variable_list.cellWidget(row, 2)
+			units = self.variable_list.cellWidget(row, 3)
+			if isinstance(role, QComboBox):
+				variable.role = role.currentText()
+			if isinstance(label, QLineEdit):
+				variable.display_name = label.text() or None
+			if isinstance(units, QLineEdit):
+				variable.units = units.text() or None
+		config.validate()
+		return config
+
+	def _document_changed(self, *_args: object) -> None:
+		if self._restoring or not hasattr(self, "_saved_snapshot"):
+			return
+		try:
+			dirty = self._snapshot_config().to_dict() != self._saved_snapshot
+		except (ValueError, TypeError):
+			dirty = True
+		name = self._document_path.name if self._document_path else "Untitled analysis"
+		self.setWindowTitle(f"Canopy Exploration Processor - {name}{' *' if dirty else ''}")
+
+	def _confirm_discard(self) -> bool:
+		try:
+			if self._snapshot_config().to_dict() == self._saved_snapshot:
+				return True
+		except (ValueError, TypeError):
+			pass
+		choice = QMessageBox.question(
+			self, "Unsaved analysis", "Save changes to this analysis?",
+			QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+			QMessageBox.StandardButton.Save,
+		)
+		if choice == QMessageBox.StandardButton.Save:
+			return self._save_analysis()
+		return choice == QMessageBox.StandardButton.Discard
+
+	def _save_analysis(self, checked: bool = False, *, save_as: bool = False) -> bool:
+		if self._thread is not None:
+			self.status_label.setText("Wait for the current operation before saving")
+			return False
+		path = self._document_path
+		if path is None or save_as:
+			selected, _ = QFileDialog.getSaveFileName(self, "Save analysis", str(path or "analysis.json"), "Analysis JSON (*.json)")
+			if not selected:
+				return False
+			path = Path(selected)
+		try:
+			config = self._snapshot_config()
+			config.save(path)
+		except (OSError, ValueError, TypeError) as error:
+			self.status_label.setText(f"Could not save analysis: {error}")
+			return False
+		self.session.config = config
+		self._document_path = path.resolve()
+		self._saved_snapshot = config.to_dict()
+		self._document_changed()
+		self.status_label.setText(f"Saved analysis: {path}")
+		return True
+
+	def _open_analysis(self) -> None:
+		if self._thread is not None or not self._confirm_discard():
+			return
+		selected, _ = QFileDialog.getOpenFileName(self, "Open analysis", "", "Analysis JSON (*.json)")
+		if not selected:
+			return
+		try:
+			config = AnalysisConfig.load(selected)
+			original = config.to_dict()
+			dataset = config.dataset
+			if dataset:
+				for attribute in ("raw_directory", "dxpx_directory"):
+					path = getattr(dataset, attribute)
+					if path is not None and not path.is_dir():
+						location = QFileDialog.getExistingDirectory(self, f"Locate missing {attribute}: {path}")
+						if not location:
+							return
+						setattr(dataset, attribute, Path(location))
+				workbook = circuit_workbook(self.settings.value(RESOURCE_DIRECTORY_KEY, "", type=str))
+				if dataset.circuit_workbook != workbook:
+					QMessageBox.information(self, "Circuit resources", "This analysis will use the current circuit folder from File > Settings.")
+				dataset.circuit_workbook = workbook
+			if config.baseline.mode == "external_study" and config.baseline.external_path and not config.baseline.external_path.is_file():
+				location, _ = QFileDialog.getOpenFileName(self, "Locate missing baseline", "", "DXPX files (*.dXpx *.dxpx)")
+				if not location:
+					return
+				config.baseline.external_path = Path(location)
+		except (OSError, ValueError, TypeError, KeyError) as error:
+			self.status_label.setText(f"Could not open analysis: {error}")
+			return
+		if dataset is None or dataset.raw_directory is None or dataset.dxpx_directory is None:
+			self._commit_open(config, Path(selected), original, None, None, None)
+			return
+
+		def operation(token: CancellationToken, progress: object) -> tuple:
+			discovery = discover_dataset(dataset.raw_directory, dataset.circuit_workbook)
+			if discovery.raw_directory is None:
+				raise ValueError("The saved raw directory is not a valid study")
+			discovery = replace(discovery, dxpx_directory=dataset.dxpx_directory)
+			loaded = load_dataset(discovery, lambda: token.cancelled, progress)
+			if token.cancelled:
+				return None
+			if not loaded.runs:
+				raise ValueError("No runs could be loaded; the current analysis has been preserved")
+			source = loaded
+			headers = {run.track_name for run in loaded.runs}
+			if (
+				dataset.confirmed_header_track and headers == {dataset.confirmed_header_track}
+				and dataset.track_name
+				and dataset.confirmed_workbook_digest == self._workbook_digest(dataset.circuit_workbook)
+			):
+				loaded = prepare_turn_zones(loaded, dataset.circuit_workbook, dataset.track_name)
+			else:
+				dataset.confirmed_header_track = None
+				dataset.confirmed_workbook_digest = None
+			return discovery, source, loaded
+
+		def received(payload: tuple) -> None:
+			self._after_worker = lambda: self._commit_open(config, Path(selected), original, *payload)
+
+		self._thread, self._worker = start_worker(operation, start=False)
+		self._worker.result_ready.connect(received)
+		self._worker.failed.connect(lambda message: self.status_label.setText(f"Could not open analysis: {message}"))
+		self._worker.cancelled.connect(lambda: self.status_label.setText("Open cancelled; current analysis preserved"))
+		self._thread.finished.connect(self._worker_finished)
+		self.workspace_tabs.setEnabled(False)
+		self.progress.setVisible(True)
+		self.cancel_button.setVisible(True)
+		self.status_label.setText("Reopening analysis sources...")
+		self._thread.start()
+
+	def _commit_open(
+		self, config: AnalysisConfig, path: Path, original: dict,
+		discovery: DiscoveryResult | None, source: LoadedDataset | None, loaded: LoadedDataset | None,
+	) -> None:
+		self._restoring = True
+		try:
+			self.session = AnalysisSession(config=deepcopy(config))
+			self._clear_results()
+			self.variable_list.setRowCount(0)
+			self.metric_combo.clear()
+			self.metric_combo.addItem("Select metric")
+			self.phase_list.clear()
+			self.zone_list.clear()
+			self.baseline_run_combo.clear()
+			self._source_loaded_dataset = source
+			self._set_track_controls_visible(False)
+			self._set_path_label(self.root_label, config.dataset.raw_directory if config.dataset else None)
+			self._set_path_label(self.raw_label, config.dataset.raw_directory if config.dataset else None)
+			self._set_path_label(self.dxpx_label, config.dataset.dxpx_directory if config.dataset else None)
+			if discovery:
+				self._discovery_succeeded(discovery)
+			if loaded:
+				self._loading_succeeded(loaded)
+				self._source_loaded_dataset = source
+			self.session.config = config
+			self.analysis_name.setText(config.name)
+			self._restore_combo(self.metric_combo, config.metric, "Select metric")
+			self._restore_combo(self.plot_combo, config.plot.plot_type)
+			self.annotate_checkbox.setChecked(config.plot.annotate)
+			self._restore_combo(self.baseline_combo, config.baseline.mode)
+			self._restore_combo(self.baseline_run_combo, config.baseline.run_index)
+			self._restore_combo(self.baseline_delta_combo, config.baseline.delta_mode)
+			self._external_baseline_path = config.baseline.external_path
+			self._set_path_label(self.external_baseline_label, config.baseline.external_path)
+			self.external_laps_edit.setText(", ".join(str(index) for index in config.baseline.lap_indices))
+			self.phase_operator.setCurrentText(config.filters.phase_operator)
+			self.zone_operator.setCurrentText(config.filters.turn_zone_operator)
+			self.category_operator.setCurrentText(config.filters.category_operator)
+			self._restore_checks(self.phase_list, config.filters.phases)
+			self._restore_checks(self.zone_list, config.filters.turn_zones)
+			if config.dataset and config.dataset.track_name:
+				self._restore_combo(self.turn_zone_track_combo, config.dataset.track_name)
+			for row, variable in enumerate(self.session.discovered_variables):
+				saved = next((item for item in config.sweep_variables if item.path == variable.path), None)
+				if saved:
+					self.variable_list.cellWidget(row, 1).setCurrentText(saved.role)
+					self.variable_list.cellWidget(row, 2).setText(saved.display_name or "")
+					self.variable_list.cellWidget(row, 3).setText(saved.units or "")
+			available = {variable.path for variable in self.session.discovered_variables}
+			missing = [variable.path for variable in config.sweep_variables if variable.path not in available]
+			for identifier in missing:
+				row = self.variable_list.rowCount()
+				self.variable_list.insertRow(row)
+				self.variable_list.setItem(row, 0, QTableWidgetItem(f"Unavailable: {identifier}"))
+			self.export_directory.setText(str(config.export.output_directory or ""))
+			self.export_svg.setChecked("svg" in config.export.formats)
+			self.export_png.setChecked("png" in config.export.formats)
+			self.workspace_tabs.setCurrentIndex(0)
+			self._document_path = path.resolve()
+			self._saved_snapshot = original
+			self.status_label.setText(
+				"Analysis restored; review unavailable selections before Apply" if missing
+				else "Analysis restored; review settings and Apply when ready"
+			)
+		finally:
+			self._restoring = False
+		self._document_changed()
+
+	@staticmethod
+	def _restore_combo(widget: QComboBox, value: object, empty_label: str = "Not selected") -> None:
+		index = widget.findData(value)
+		if index < 0:
+			widget.addItem(f"{value} (unavailable)" if value is not None else empty_label, value)
+			index = widget.count() - 1
+		widget.setCurrentIndex(index)
+
+	def _restore_checks(self, widget: QListWidget, names: tuple[str, ...]) -> None:
+		available = {widget.item(index).text() for index in range(widget.count())}
+		for name in names:
+			if name not in available:
+				self._add_checkable_item(widget, name)
+				widget.item(widget.count() - 1).setToolTip("Saved selection unavailable until compatible source masks are loaded")
+		for index in range(widget.count()):
+			item = widget.item(index)
+			item.setCheckState(Qt.CheckState.Checked if item.text() in names else Qt.CheckState.Unchecked)
+
+	def _clear_results(self) -> None:
+		self.session.result = None
+		self._applied_config = None
+		self.export_button.setEnabled(False)
+		self.results_table.setRowCount(0)
+		self.comparison_table.setRowCount(0)
+		self.figure_canvas.figure.clear()
+		self.figure_canvas.draw()
+		self.results_label.setText("No analysis results for this configuration")
+
+	def _choose_export_directory(self) -> None:
+		path = QFileDialog.getExistingDirectory(self, "Choose figure export folder")
+		if path:
+			self.export_directory.setText(path)
+
+	def _export_figure(self) -> None:
+		if self._applied_config is None:
+			return
+		try:
+			config = deepcopy(self._applied_config)
+			config.export = self._snapshot_config().export
+			if not config.export.formats or config.export.output_directory is None:
+				raise ValueError("Choose an export folder and at least one format")
+			filename = self._document_path.stem if self._document_path else "canopy_analysis"
+			if any((config.export.output_directory / f"{filename}.{extension}").exists() for extension in config.export.formats):
+				if QMessageBox.question(self, "Overwrite figures?", "Replace existing exported figures?") != QMessageBox.StandardButton.Yes:
+					return
+			paths = export_analysis(self.figure_canvas.figure, config, filename=filename)
+			self.status_label.setText("Exported: " + ", ".join(str(path) for path in paths))
+		except (OSError, ValueError, TypeError) as error:
+			self.status_label.setText(f"Could not export figure: {error}")
 
 	def _build_ui(self) -> None:
 		root = QWidget()
@@ -118,6 +436,8 @@ class MainWindow(QMainWindow):
 		dataset.setObjectName("datasetGroup")
 		dataset.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 		dataset_form = QFormLayout(dataset)
+		self.analysis_name = QLineEdit("Canopy Analysis")
+		dataset_form.addRow("Analysis name:", self.analysis_name)
 		self.root_label = QLabel("No root selected")
 		self.root_label.setObjectName("muted")
 		self.root_label.setWordWrap(True)
@@ -144,8 +464,8 @@ class MainWindow(QMainWindow):
 		variables.setObjectName("sweepVariablesGroup")
 		variables.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 		variables_layout = QVBoxLayout(variables)
-		self.variable_list = QTableWidget(0, 2)
-		self.variable_list.setHorizontalHeaderLabels(["Variable", "Role"])
+		self.variable_list = QTableWidget(0, 4)
+		self.variable_list.setHorizontalHeaderLabels(["Variable", "Role", "Display name", "Units"])
 		self.variable_list.setSelectionBehavior(QAbstractItemView.SelectRows)
 		self.variable_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
 		self.variable_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -200,6 +520,8 @@ class MainWindow(QMainWindow):
 			self.baseline_delta_combo.addItem(label, value)
 		self.baseline_delta_combo.setCurrentIndex(1)
 		self._external_baseline_path: Path | None = None
+		self.annotate_checkbox = QCheckBox("Show heatmap values")
+		self.annotate_checkbox.setChecked(True)
 		self.phase_list = QListWidget()
 		self.phase_list.setSelectionMode(QAbstractItemView.NoSelection)
 		self.phase_list.setMinimumHeight(80)
@@ -221,6 +543,7 @@ class MainWindow(QMainWindow):
 		self.prepare_turn_zones_button.clicked.connect(self._prepare_turn_zones)
 		analysis_form.addRow("Metric:", self.metric_combo)
 		analysis_form.addRow("Plot:", self.plot_combo)
+		analysis_form.addRow(self.annotate_checkbox)
 		analysis_form.addRow("Baseline:", self.baseline_combo)
 		analysis_form.addRow("Baseline run:", self.baseline_run_combo)
 		analysis_form.addRow("External file:", self.external_baseline_button)
@@ -259,6 +582,21 @@ class MainWindow(QMainWindow):
 		self.results_table = QTableWidget(0, 0)
 		self.results_table.setMinimumHeight(180)
 		layout.addWidget(self.results_table)
+		export_layout = QHBoxLayout()
+		self.export_directory = QLineEdit()
+		self.export_directory.setPlaceholderText("Figure export folder")
+		export_folder_button = QPushButton("Choose export folder")
+		export_folder_button.clicked.connect(self._choose_export_directory)
+		self.export_svg = QCheckBox("SVG")
+		self.export_png = QCheckBox("PNG")
+		self.export_svg.setChecked(True)
+		self.export_png.setChecked(True)
+		self.export_button = QPushButton("Export Figure")
+		self.export_button.setEnabled(False)
+		self.export_button.clicked.connect(self._export_figure)
+		for widget in (self.export_directory, export_folder_button, self.export_svg, self.export_png, self.export_button):
+			export_layout.addWidget(widget)
+		layout.addLayout(export_layout)
 		return panel
 
 	def _build_comparison(self) -> QWidget:
@@ -287,11 +625,16 @@ class MainWindow(QMainWindow):
 		self.addDockWidget(Qt.BottomDockWidgetArea, dock)
 
 	def _select_raw_study(self) -> None:
+		if self._thread is not None or not self._confirm_discard():
+			return
 		path = QFileDialog.getExistingDirectory(self, "Select one raw StudyName folder")
 		if path:
 			self.root_label.setText(path)
 			self.root_label.setToolTip(path)
 			self.session.begin_discovery()
+			self.session.config = AnalysisConfig()
+			self._document_path = None
+			self._clear_results()
 			self._source_loaded_dataset = None
 			self._set_track_controls_visible(False)
 			self.variable_list.clear()
@@ -324,6 +667,7 @@ class MainWindow(QMainWindow):
 		self.progress.setValue(0)
 		self.progress.setVisible(True)
 		self.cancel_button.setVisible(True)
+		self.workspace_tabs.setEnabled(False)
 		self._thread.start()
 
 	def _show_progress(self, stage: str, value: int, total: int) -> None:
@@ -338,8 +682,8 @@ class MainWindow(QMainWindow):
 		self._set_path_label(self.dxpx_label, result.dxpx_directory)
 		self.choose_dxpx_button.setEnabled(result.raw_directory is not None)
 		self.variable_list.clear()
-		self.variable_list.setColumnCount(2)
-		self.variable_list.setHorizontalHeaderLabels(["Variable", "Role"])
+		self.variable_list.setColumnCount(4)
+		self.variable_list.setHorizontalHeaderLabels(["Variable", "Role", "Display name", "Units"])
 		self.variable_list.setRowCount(len(result.variables))
 		for row, variable in enumerate(result.variables):
 			units = f" [{variable.units}]" if variable.units else ""
@@ -348,12 +692,18 @@ class MainWindow(QMainWindow):
 			role.addItems(["unused", "x", "y", "facet", "color"])
 			role.currentTextChanged.connect(lambda value, row=row: self._update_config_role(row, value))
 			self.variable_list.setCellWidget(row, 1, role)
+			for column, text in ((2, ""), (3, variable.units or "")):
+				editor = QLineEdit(text)
+				editor.textChanged.connect(self._document_changed)
+				self.variable_list.setCellWidget(row, column, editor)
+			role.currentIndexChanged.connect(self._document_changed)
 		if not result.variables:
 			self.variable_list.setRowCount(1)
 			self.variable_list.setItem(0, 0, QTableWidgetItem("No numeric sweep variables found"))
 		self.confirm_button.setEnabled(bool(result.variables) and result.dxpx_directory is not None and result.raw_directory is not None)
 		self.status_label.setText(self._discovery_status(result))
 		self.status_label.setToolTip("\n".join(result.diagnostics))
+		self._document_changed()
 
 	def _update_config_role(self, row: int, role: str) -> None:
 		"""Keep visible role edits synchronized after variable confirmation."""
@@ -365,8 +715,17 @@ class MainWindow(QMainWindow):
 			if variable.path == path:
 				variable.role = role
 				return
+		if role != "unused" and self.session.config.sweep_variables and not self._restoring:
+			self.session.config.sweep_variables.append(SweepVariableConfig(
+				path=path,
+				display_name=self.variable_list.cellWidget(row, 2).text() or None,
+				units=self.variable_list.cellWidget(row, 3).text() or None,
+				role=role,
+			))
 
 	def _choose_dxpx(self) -> None:
+		if self._thread is not None:
+			return
 		path = QFileDialog.getExistingDirectory(self, "Select DXPX study folder")
 		if not path:
 			return
@@ -384,9 +743,16 @@ class MainWindow(QMainWindow):
 			dxpx_candidates=result.dxpx_candidates,
 		)
 		self.session.discovery_result = updated
+		if self.session.config.dataset:
+			self.session.config.dataset.dxpx_directory = Path(path)
+		self.session.loaded_dataset = None
+		self._source_loaded_dataset = None
+		self.session.state = SessionState.REVIEW_REQUIRED
+		self.confirm_button.setEnabled(bool(updated.variables))
 		self.dxpx_label.setText(path)
 		self.dxpx_label.setToolTip(path)
 		self.status_label.setText("Manual DXPX path selected; review and confirm")
+		self._document_changed()
 
 	def _set_path_label(self, label: QLabel, path: Path | None) -> None:
 		"""Show the complete path in the wrapping label and its tooltip."""
@@ -401,10 +767,18 @@ class MainWindow(QMainWindow):
 		return f"Discovered {len(result.variables)} sweep variable(s); review and confirm"
 
 	def _confirm_variables(self) -> None:
+		if self._thread is not None:
+			return
 		result = self.session.discovery_result
 		if not isinstance(result, DiscoveryResult) or result.dxpx_directory is None or result.raw_directory is None:
 			return
 		selected_rows = sorted({index.row() for index in self.variable_list.selectionModel().selectedRows()})
+		assigned_rows = {
+			row for row in range(len(result.variables))
+			if self.variable_list.cellWidget(row, 1).currentText() != "unused"
+		}
+		selected_rows = sorted(set(selected_rows) | assigned_rows)
+		selected_rows = [row for row in selected_rows if row < len(result.variables)]
 		if not selected_rows:
 			self.status_label.setText("Select at least one sweep variable")
 			return
@@ -418,12 +792,17 @@ class MainWindow(QMainWindow):
 			role_widget = self.variable_list.cellWidget(row, 1)
 			role = role_widget.currentText() if isinstance(role_widget, QComboBox) else "unused"
 			self.session.config.sweep_variables.append(
-				SweepVariableConfig(path=result.variables[row].path, units=result.variables[row].units, role=role)
+				SweepVariableConfig(
+					path=result.variables[row].path,
+					display_name=self.variable_list.cellWidget(row, 2).text() or None,
+					units=self.variable_list.cellWidget(row, 3).text() or None, role=role,
+				)
 			)
 		self.session.mark_ready()
 		self.confirm_button.setEnabled(False)
 		self.status_label.setText("Loading simulation runs...")
 		self._start_loading(result)
+		self._document_changed()
 
 	def _start_loading(self, discovery: DiscoveryResult) -> None:
 		self.session.begin_loading()
@@ -439,6 +818,7 @@ class MainWindow(QMainWindow):
 		self._thread.finished.connect(self._worker_finished)
 		self.progress.setVisible(True)
 		self.cancel_button.setVisible(True)
+		self.workspace_tabs.setEnabled(False)
 		self._thread.start()
 
 	def _loading_succeeded(self, loaded: LoadedDataset) -> None:
@@ -542,6 +922,8 @@ class MainWindow(QMainWindow):
 				label.setVisible(visible)
 
 	def _prepare_turn_zones(self) -> None:
+		if self._thread is not None:
+			return
 		loaded = self._source_loaded_dataset
 		track_name = self.turn_zone_track_combo.currentData()
 		dataset = self.session.config.dataset
@@ -552,6 +934,9 @@ class MainWindow(QMainWindow):
 			self.status_label.setText("Select and confirm a circuit before adding turn zones")
 			return
 		self.session.config.dataset.track_name = str(track_name)
+		self.session.config.dataset.confirmed_header_track = None
+		self.session.config.dataset.confirmed_workbook_digest = None
+		self._pending_zone_checks = self._checked_names(self.zone_list)
 		self.prepare_turn_zones_button.setEnabled(False)
 		self.status_label.setText(f"Adding turn zones for {track_name}...")
 
@@ -567,11 +952,13 @@ class MainWindow(QMainWindow):
 		self._thread.finished.connect(self._worker_finished)
 		self.progress.setVisible(True)
 		self.cancel_button.setVisible(True)
+		self.workspace_tabs.setEnabled(False)
 		self._thread.start()
 
 	def _turn_zones_succeeded(self, loaded: LoadedDataset) -> None:
 		self.session.publish_loaded_dataset(loaded)
 		self._populate_zone_list(loaded)
+		self._restore_checks(self.zone_list, getattr(self, "_pending_zone_checks", ()))
 		self.prepare_turn_zones_button.setEnabled(True)
 		self.prepare_turn_zones_button.setText("Regenerate zones with selected track")
 		track_name = self.session.config.dataset.track_name if self.session.config.dataset else ""
@@ -585,6 +972,11 @@ class MainWindow(QMainWindow):
 		self.status_label.setText(
 			f"Turn zones prepared for {track_name}: {self.zone_list.count()} shared zone(s)"
 		)
+		dataset = self.session.config.dataset
+		if dataset and loaded.runs and all(run.turn_zone_names for run in loaded.runs) and len(detected_tracks) == 1:
+			dataset.confirmed_header_track = detected_tracks[0]
+			dataset.confirmed_workbook_digest = self._workbook_digest(dataset.circuit_workbook)
+		self._document_changed()
 
 	def _operation_failed(self, message: str) -> None:
 		self.session.fail(message)
@@ -601,17 +993,26 @@ class MainWindow(QMainWindow):
 		self.cancel_button.setVisible(False)
 		self._worker = None
 		self._thread = None
+		self.workspace_tabs.setEnabled(True)
+		callback, self._after_worker = self._after_worker, None
+		if callback is not None:
+			callback()
 
 	def closeEvent(self, event: QCloseEvent) -> None:
 		"""Stop an active operation before the window and its Qt objects close."""
 
-		if self._worker is not None and self._thread is not None:
-			self._worker.request_cancel()
-			self._thread.quit()
-			self._thread.wait(2000)
+		if self._thread is not None:
+			self.status_label.setText("Wait for the current operation or cancel it before closing")
+			event.ignore()
+			return
+		if not self._confirm_discard():
+			event.ignore()
+			return
 		event.accept()
 
 	def _begin_analysis(self) -> None:
+		if self._thread is not None:
+			return
 		if self.session.state not in {SessionState.READY, SessionState.RESULTS_AVAILABLE}:
 			self.status_label.setText("Review the discovered variables before applying analysis")
 			return
@@ -623,71 +1024,35 @@ class MainWindow(QMainWindow):
 		if not metric_name:
 			self.status_label.setText("Select a metric before applying analysis")
 			return
-		self.session.config.metrics = [metric_name]
-		self._sync_config_roles()
-		self._ensure_roles_from_visible_controls()
-		self.session.config.filters = FilterConfig(
-			phases=tuple(
-				self.phase_list.item(index).text()
-				for index in range(self.phase_list.count())
-				if self.phase_list.item(index).checkState() == Qt.CheckState.Checked
-			),
-			turn_zones=tuple(
-				self.zone_list.item(index).text()
-				for index in range(self.zone_list.count())
-				if self.zone_list.item(index).checkState() == Qt.CheckState.Checked
-			),
-			phase_operator=self.phase_operator.currentText(),
-			turn_zone_operator=self.zone_operator.currentText(),
-			category_operator=self.category_operator.currentText(),
-		)
 		try:
-			self.session.config.baseline = self._baseline_config()
-		except ValueError as error:
+			config = self._snapshot_config()
+			config.validate_ready()
+			available_paths = {variable.path for variable in self.session.discovered_variables}
+			missing = {variable.path for variable in config.sweep_variables} - available_paths
+			if missing:
+				raise ValueError(f"Saved variables are unavailable; reconfirm selections: {', '.join(sorted(missing))}")
+			if config.metric not in loaded.metrics:
+				raise ValueError("The saved metric is unavailable; choose a compatible metric")
+			if config.filters.turn_zones and self._source_loaded_dataset and any(
+				not run.turn_zone_names for run in self._source_loaded_dataset.runs
+			):
+				if not config.dataset.confirmed_header_track:
+					raise ValueError("Confirm the selected circuit before applying generated turn-zone filters")
+			for run in loaded.runs:
+				missing_masks = set(config.filters.phases + config.filters.turn_zones) - set(run.data)
+				if missing_masks:
+					raise ValueError(f"Unavailable filters: {', '.join(sorted(missing_masks))}")
+			self.session.config = config
+		except (ValueError, TypeError) as error:
 			self.status_label.setText(str(error))
 			return
-		plot_type = self.plot_combo.currentData()
-		if plot_type == "suggested":
-			roles = {variable.role for variable in self.session.config.sweep_variables}
-			plot_type = "heatmap" if {"x", "y"}.issubset(roles) else "line"
-		self.session.config.plot.plot_type = plot_type
 		self.session.begin_analysis()
 		self.status_label.setText("Analyzing selected metric...")
 		self._start_analysis(loaded)
 
-	def _sync_config_roles(self) -> None:
-		"""Copy current role controls into the confirmed configuration."""
-
-		configured = {variable.path: variable for variable in self.session.config.sweep_variables}
-		for row, discovered in enumerate(self.session.discovered_variables):
-			variable = configured.get(discovered.path)
-			role_widget = self.variable_list.cellWidget(row, 1)
-			if variable is not None and isinstance(role_widget, QComboBox):
-				variable.role = role_widget.currentText()
-
-	def _ensure_roles_from_visible_controls(self) -> None:
-		"""Recover role assignments if row selection was lost after confirmation."""
-
-		roles = {
-			self.session.discovered_variables[row].path: self.variable_list.cellWidget(row, 1).currentText()
-			for row in range(self.variable_list.rowCount())
-			if row < len(self.session.discovered_variables)
-			and isinstance(self.variable_list.cellWidget(row, 1), QComboBox)
-		}
-		configured_roles = {variable.role for variable in self.session.config.sweep_variables}
-		if "x" in roles.values() and "y" in roles.values() and not {"x", "y"}.issubset(configured_roles):
-			self.session.config.sweep_variables = [
-				SweepVariableConfig(
-					path=variable.path,
-					units=variable.units,
-					role=roles[variable.path],
-				)
-				for variable in self.session.discovered_variables
-				if roles.get(variable.path, "unused") != "unused"
-			]
-
 	def _start_analysis(self, loaded: LoadedDataset) -> None:
-		config = self.session.config
+		config = deepcopy(self.session.config)
+		self._analysis_config = config
 		discovered_variables = self.session.discovered_variables
 
 		def operation(token: CancellationToken, progress: object) -> AnalysisOutput:
@@ -705,16 +1070,28 @@ class MainWindow(QMainWindow):
 		self.progress.setValue(0)
 		self.progress.setVisible(True)
 		self.cancel_button.setVisible(True)
+		self.workspace_tabs.setEnabled(False)
 		self._thread.start()
 
 	def _analysis_succeeded(self, output: AnalysisOutput) -> None:
 		self.session.publish_result(output)
-		figure = render_plot_data(output.plot_data, scatter=self.session.config.plot.plot_type == "scatter")
+		self._applied_config = deepcopy(self._analysis_config or self.session.config)
+		config = self._applied_config
+		labels = {
+			variable.path: variable.label + (f" [{variable.units}]" if variable.units else "")
+			for variable in config.sweep_variables
+		}
+		figure = render_plot_data(
+			output.plot_data, scatter=config.plot.plot_type == "scatter",
+			annotate=config.plot.annotate, labels=labels,
+		)
+		figure.set_canvas(self.figure_canvas)
 		self.figure_canvas.figure = figure
 		self.figure_canvas.draw()
 		self.results_label.setText(f"{output.metric_name}: {len(output.rows)} analyzed run(s)")
 		self._populate_results_table(output)
 		self._populate_comparison_table(output)
+		self.export_button.setEnabled(True)
 
 	def _baseline_mode_changed(self, *_args: object) -> None:
 		mode = self.baseline_combo.currentData()
@@ -744,22 +1121,14 @@ class MainWindow(QMainWindow):
 
 	def _baseline_config(self) -> BaselineConfig:
 		mode = self.baseline_combo.currentData()
-		if mode == "none":
-			return BaselineConfig()
 		delta_mode = self.baseline_delta_combo.currentData()
-		if mode == "loaded_run":
-			run_index = self.baseline_run_combo.currentData()
-			if run_index is None:
-				raise ValueError("Select a loaded run for the baseline")
-			return BaselineConfig(mode=mode, run_index=int(run_index), delta_mode=delta_mode)
-		if self._external_baseline_path is None:
-			raise ValueError("Choose an external baseline DXPX file")
 		try:
-			lap_indices = tuple(int(value.strip()) for value in self.external_laps_edit.text().split(","))
+			lap_indices = tuple(int(value.strip()) for value in self.external_laps_edit.text().split(",") if value.strip())
 		except ValueError as error:
 			raise ValueError("Lap indices must be comma-separated zero-based integers") from error
 		return BaselineConfig(
 			mode=mode,
+			run_index=self.baseline_run_combo.currentData(),
 			external_path=self._external_baseline_path,
 			lap_indices=lap_indices,
 			delta_mode=delta_mode,

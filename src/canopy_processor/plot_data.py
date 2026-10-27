@@ -11,7 +11,7 @@ from typing import Iterable
 
 import numpy as np
 
-from .config import PlotConfig
+from .config import PlotConfig, SweepVariableConfig
 from .results import GridPoint, GridResult
 
 
@@ -57,7 +57,33 @@ class ParallelCoordinatesData:
 	run_indices: np.ndarray
 
 
-def build_plot_data(grid: GridResult, plot: PlotConfig):
+@dataclass(frozen=True)
+class ResolvedPlot:
+	"""Runtime axes derived from roles, never stored in a recipe."""
+
+	plot_type: str
+	x_variable: str | None
+	y_variable: str | None
+	facet_variables: tuple[str, ...]
+	color_variable: str | None
+
+
+def resolve_plot(plot: PlotConfig, variables: Iterable[SweepVariableConfig]) -> ResolvedPlot:
+	selected = tuple(variables)
+	for role in ("x", "y", "color"):
+		if sum(variable.role == role for variable in selected) > 1:
+			raise ValueError(f"Assign at most one variable to the {role} role")
+	roles = {variable.role: variable.path for variable in selected}
+	plot_type = plot.plot_type
+	if plot_type == "suggested":
+		plot_type = "heatmap" if "x" in roles and "y" in roles else "line"
+	return ResolvedPlot(
+		plot_type, roles.get("x"), roles.get("y"),
+		tuple(variable.path for variable in selected if variable.role == "facet"), roles.get("color"),
+	)
+
+
+def build_plot_data(grid: GridResult, plot: ResolvedPlot):
 	"""Build the data object required by the configured plot type."""
 
 	if plot.plot_type in {"line", "scatter"}:

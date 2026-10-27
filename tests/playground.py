@@ -1,6 +1,7 @@
 """Loose interactive scratchpad for exploring the Canopy processor package."""
 
 from pathlib import Path
+from dataclasses import replace
 import tkinter as tk
 from tkinter import filedialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -23,20 +24,11 @@ from canopy_processor import (
     load_dxpx_laps,
     load_exploration_definition,
     load_job_records,
-    analyze_runs,
-    analyze_baseline,
-    analyze_metric,
-    join_sweep_variables,
-    resolve_baseline_laps,
-    compare_rows_to_baseline,
-    build_grid,
-    build_heatmap_data,
     export_analysis,
-    render_line,
-    render_parallel_coordinates,
-    render_heatmap,
-    render_faceted_heatmap
+    render_plot_data,
 )
+from canopy_processor.ui.discovery import discover_dataset
+from canopy_processor.ui.pipeline import load_dataset, prepare_turn_zones, analyze_loaded_dataset
 
 
 def _lap_label(index: int, lap) -> str:
@@ -191,6 +183,7 @@ try:
             dxpx_directory=Path(dxpx_directory),
             raw_directory=Path(raw_directory),
             circuit_workbook=Path(circuit_data_path),
+            track_name=run.track_name,
         ),
         baseline=BaselineConfig(
             mode="external_study",
@@ -207,13 +200,16 @@ try:
                 units="bar",
                 display_name="Front Tyre Pressure",
                 role="x",
-            )
+            ),
+            SweepVariableConfig(
+                path="car.tyres.rear.INITIAL_CONDITIONS.InfPress",
+                units="bar",
+                display_name="Rear Tyre Pressure",
+                role="y",
+            ),
         ],
-        metrics=["gCarPotential"],
-        plot=PlotConfig(
-            plot_type="line",
-            x_variable="car.tyres.front.INITIAL_CONDITIONS.InfPress",
-        ),
+        metric="gCarPotential",
+        plot=PlotConfig(plot_type="heatmap"),
         filters=FilterConfig(phases=("isApex",))
     )
 
@@ -237,61 +233,34 @@ try:
         filetypes=[("JSON files", "*.json")],
     )
     if load_path:
-        loaded_config = AnalysisConfig.load(load_path)
-        print(f"Loaded configuration: {loaded_config.name}\n")
+        config = AnalysisConfig.load(load_path)
+        print(f"Loaded configuration: {config.name}\n")
 
-    filters = config.filters
-
-
-    # Join reduced metric results back to their sweep-variable coordinates and compare to baseline.
-    filters = FilterConfig(phases=("isApex",))
-    grip_results = analyze_runs(runs, metrics["gCarPotential"], filters, method="mean")
-    rows = join_sweep_variables(runs, grip_results, job_variables)
-    laps = resolve_baseline_laps(config.baseline)
-    baseline_grip = analyze_baseline(laps, metrics["gCarPotential"], filters, method="mean")
-    compared = compare_rows_to_baseline(rows, baseline_grip, delta_mode=config.baseline.delta_mode)
-    for (row, comparison) in zip(rows, compared):
-        print(
-            f"Run {row.run_index}: {row.sweep_values} -> "
-            f"{row.metric_result.method} {row.metric_result.metric_name}= "
-            f"{row.metric_result.value:.4f} "
-            f"{comparison.delta_mode} difference = {comparison.delta:.4f}"
-        )
-
-    grid = build_grid(
-        rows,
-        variable_paths=(
-            "car.tyres.front.INITIAL_CONDITIONS.InfPress",
-            "car.tyres.rear.INITIAL_CONDITIONS.InfPress",
-        ),
+    discovery = discover_dataset(config.dataset.raw_directory, config.dataset.circuit_workbook)
+    discovery = replace(discovery, dxpx_directory=config.dataset.dxpx_directory)
+    loaded = load_dataset(discovery)
+    if config.filters.turn_zones:
+        from tkinter import messagebox
+        if not messagebox.askyesno("Confirm circuit", f"Generate turn zones for {config.dataset.track_name}?", parent=root):
+            raise RuntimeError("Circuit confirmation cancelled")
+        loaded = prepare_turn_zones(loaded, config.dataset.circuit_workbook, config.dataset.track_name)
+        config.dataset.confirmed_header_track = loaded.runs[0].track_name
+    output = analyze_loaded_dataset(loaded, config, discovery.variables)
+    rendered = render_plot_data(
+        output.plot_data,
+        scatter=config.plot.plot_type == "scatter",
+        annotate=config.plot.annotate,
+        labels={variable.path: variable.label for variable in config.sweep_variables},
     )
-    heatmap_data = build_heatmap_data(
-        grid.points,
-        x_variable="car.tyres.rear.INITIAL_CONDITIONS.InfPress",
-        y_variable="car.tyres.front.INITIAL_CONDITIONS.InfPress",
-    )
-    print(
-        f"\nHeatmap: x={heatmap_data.x_variable}, "
-        f"y={heatmap_data.y_variable}, shape={heatmap_data.values.shape}"
-    )
-    print(f"Heatmap x values: {heatmap_data.x_values}")
-    print(f"Heatmap y values: {heatmap_data.y_values}")
-    print(f"Missing heatmap cells: {np.isnan(heatmap_data.values).sum()}")
-
-    rendered_heatmap = render_heatmap(heatmap_data)
     plot_window = tk.Toplevel(root)
-    plot_window.title("Grip Heatmap")
-    canvas = FigureCanvasTkAgg(rendered_heatmap, master=plot_window)
+    plot_window.title(config.name)
+    canvas = FigureCanvasTkAgg(rendered, master=plot_window)
     canvas.draw()
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-    plot_window.protocol("WM_DELETE_WINDOW", plot_window.destroy)
-    exported_paths = export_analysis(
-        rendered_heatmap,
-        config,
-        filename="grip_heatmap",
-    )
-    for exported_path in exported_paths:
-        print(f"Exported: {exported_path}")
+    if config.export.output_directory and config.export.formats:
+        for path in export_analysis(rendered, config, filename="analysis"):
+            print(f"Exported: {path}")
     root.wait_window(plot_window)
+
 finally:
     root.destroy()

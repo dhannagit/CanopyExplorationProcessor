@@ -32,7 +32,7 @@ def render_line(data: LinePlotData, *, scatter: bool = False) -> Figure:
 	return figure
 
 
-def render_heatmap(data: HeatmapPlotData) -> Figure:
+def render_heatmap(data: HeatmapPlotData, *, annotate: bool = True) -> Figure:
 	"""Render a two-dimensional heatmap and return its Figure."""
 
 	figure = Figure()
@@ -47,7 +47,8 @@ def render_heatmap(data: HeatmapPlotData) -> Figure:
 	)
 	axis.set_xticks(data.x_values)
 	axis.set_yticks(data.y_values)
-	_annotate_heatmap(axis, data)
+	if annotate:
+		_annotate_heatmap(axis, data)
 	axis.set_xlabel(data.x_variable)
 	axis.set_ylabel(data.y_variable)
 	axis.set_title(data.metric_name)
@@ -56,7 +57,7 @@ def render_heatmap(data: HeatmapPlotData) -> Figure:
 	return figure
 
 
-def render_faceted_heatmap(data: FacetedHeatmapData) -> Figure:
+def render_faceted_heatmap(data: FacetedHeatmapData, *, annotate: bool = True) -> Figure:
 	"""Render one heatmap per facet combination and return its Figure."""
 
 	if not data.facets:
@@ -76,7 +77,8 @@ def render_faceted_heatmap(data: FacetedHeatmapData) -> Figure:
 		)
 		axis.set_xticks(facet.x_values)
 		axis.set_yticks(facet.y_values)
-		_annotate_heatmap(axis, facet)
+		if annotate:
+			_annotate_heatmap(axis, facet)
 		label = " | ".join(f"{name}={value:g}" for name, value in zip(data.facet_variables, key))
 		axis.set_title(label)
 		axis.set_xlabel(facet.x_variable)
@@ -112,18 +114,35 @@ def render_parallel_coordinates(data: ParallelCoordinatesData) -> Figure:
 	return figure
 
 
-def render_plot_data(data: Any, *, scatter: bool = False) -> Figure:
+def render_plot_data(
+	data: Any, *, scatter: bool = False, annotate: bool = True,
+	labels: dict[str, str] | None = None,
+) -> Figure:
 	"""Dispatch to the renderer matching a plot-data dataclass."""
 
 	if isinstance(data, LinePlotData):
-		return render_line(data, scatter=scatter)
-	if isinstance(data, HeatmapPlotData):
-		return render_heatmap(data)
-	if isinstance(data, FacetedHeatmapData):
-		return render_faceted_heatmap(data)
-	if isinstance(data, ParallelCoordinatesData):
-		return render_parallel_coordinates(data)
-	raise TypeError(f"Unsupported plot-data type: {type(data).__name__}")
+		figure = render_line(data, scatter=scatter)
+	elif isinstance(data, HeatmapPlotData):
+		figure = render_heatmap(data, annotate=annotate)
+	elif isinstance(data, FacetedHeatmapData):
+		figure = render_faceted_heatmap(data, annotate=annotate)
+	elif isinstance(data, ParallelCoordinatesData):
+		figure = render_parallel_coordinates(data)
+	else:
+		raise TypeError(f"Unsupported plot-data type: {type(data).__name__}")
+	if labels:
+		for axis in figure.axes:
+			axis.set_xlabel(labels.get(axis.get_xlabel(), axis.get_xlabel()))
+			axis.set_ylabel(labels.get(axis.get_ylabel(), axis.get_ylabel()))
+			if isinstance(data, ParallelCoordinatesData):
+				axis.set_xticks(axis.get_xticks(), [labels.get(name, name) for name in data.variables])
+			if isinstance(data, FacetedHeatmapData):
+				title = axis.get_title()
+				for path in sorted(labels, key=len, reverse=True):
+					title = title.replace(f"{path}=", f"{labels[path]}=")
+				axis.set_title(title)
+		figure.tight_layout()
+	return figure
 
 
 def _heatmap_extent(data: HeatmapPlotData) -> tuple[float, float, float, float]:

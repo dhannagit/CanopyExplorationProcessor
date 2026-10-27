@@ -63,6 +63,26 @@ folder changes to subsequent study loads without rewriting loaded dataset paths.
 of application releases. This matches DataConverter's preferences workflow without
 requiring SharePoint API credentials or distributing a stale bundled workbook.
 
+## ADR-007 - Persist analysis recipes rather than result projects
+
+**Status:** Accepted
+
+**Decision:** Save current analysis controls, including incomplete drafts, as
+versioned JSON recipes. Keep raw signals, reduced results, plot zoom, window
+layout, and images outside the document. Reopen original sources in the background,
+restore settings by stable identifiers, and wait for explicit Apply. Failed or
+cancelled Open must preserve the current session. Replace saved JSON atomically.
+
+Use one active metric and derive plot assignments from variable roles. Keep
+suggested plot intent distinct from its runtime resolution. Preserve inactive
+baseline choices. Resolve shared circuit resources through per-user settings;
+reuse successful zone confirmation only when the header track and workbook
+fingerprint match. External baseline headers must independently match approval.
+
+**Reason:** Recipes stay small and reproducible while avoiding stale cached data
+and hidden automatic analysis. Schema version 2 deliberately replaces the
+pre-production format without a migration layer.
+
 ## Presentation Evidence To Capture
 
 - Before/after workflow diagram: three hardcoded MATLAB scripts versus one configurable Python application.

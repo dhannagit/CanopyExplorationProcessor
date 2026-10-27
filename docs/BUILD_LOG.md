@@ -443,7 +443,32 @@ publishing access, validate on a teammate's normal Windows account, and provisio
 the external sample datasets for full numerical/GUI regression testing. No release
 has been published and no production installation was modified.
 
+## 2026-10-27 - Save and reopen analysis recipes
+
+**Goal:** Save current analysis edits, including incomplete drafts, and reopen their original source data without storing loaded signals or computed results.
+
+**Changed:** Added File > Open Analysis, Save, and Save As with unsaved-change prompts, atomic JSON replacement, source-path relocation, and candidate loading that preserves the active session on failure or cancellation. Added analysis names, variable display-name/unit editors, heatmap annotation settings, and SVG/PNG figure export. Save and Apply share a current-controls snapshot; reopening waits for Apply. The playground now analyzes the reopened recipe rather than continuing with its original settings.
+
+**Decisions:** The pre-production schema is version 2 with one active metric and variable roles as the canonical axis assignments. Removed unused coordinate transforms and redundant dataset/axis fields without legacy migration. Preserve inactive baseline settings. Use current per-user circuit resources, and reuse saved zone confirmation only when the detected track and workbook fingerprint match; mismatched baseline tracks cannot reuse sweep approval.
+
+**Evidence:** Full suite passes with 96 tests after pressure, TrackTempSweep, and baseline fixtures were restored. Tests cover draft round trips, failed atomic writes, background reopening, DXPX overrides, track-confirmation reuse/mismatch, cancellation/failure preservation, annotation/label rendering, and reopen-to-analysis-to-SVG/PNG export. Temporary test directories created during this work were removed.
+
+**Next:** Manually review the new editors and Save/Open/Export dialogs on the target Windows display-scaling settings.
+
+## 2026-10-27 - Keep assigned sweep axes in saved analyses
+
+**Goal:** Fix heatmaps reporting a missing y axis when the GUI visibly assigned one, and prevent Save from omitting that variable.
+
+**Root cause:** Confirmation included only highlighted rows, while role edits updated only variables already in the confirmed configuration. Assigning a visible role to another row did not include that variable. Recipe persistence exposed this discrepancy after the old role-recovery heuristic was removed.
+
+**Changed:** Confirmation now includes explicitly assigned roles as well as highlighted rows. Assigning a role to another variable after confirmation also includes that variable, preserving its display name and units. Highlighting alone still does not change an already-confirmed analysis.
+
+**Evidence:** New regression cases assign front=y and rear=x with only the rear row highlighted, both before and after confirmation. Each verifies that saved JSON contains both axes and analysis renders a labeled 2x2 heatmap. Full suite passes with 98 tests.
+
+**Next:** Manually verify the corrected selection workflow with the user's pressure-analysis recipe.
+
 ## Logging Checklist
+
 
 For each future milestone, append one dated entry with:
 

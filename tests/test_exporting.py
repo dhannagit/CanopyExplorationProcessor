@@ -24,7 +24,7 @@ def _row() -> AnalysisRow:
 def _config(output_directory: Path) -> AnalysisConfig:
 	return AnalysisConfig(
 		sweep_variables=[SweepVariableConfig(path="pressure", role="x")],
-		plot=PlotConfig(plot_type="line", x_variable="pressure"),
+		plot=PlotConfig(plot_type="line"),
 		export=ExportConfig(
 		output_directory=output_directory,
 		formats=("svg", "png"),

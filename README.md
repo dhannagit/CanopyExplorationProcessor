@@ -30,8 +30,9 @@ filters. Start with a simple plot of one metric against one sweep variable:
 2. Check the detected **Raw** and **DXPX** paths. If the matching simulation outputs
 	were not found automatically, click **Choose DXPX folder** and select that study's
 	output folder.
-3. In **Sweep variables**, select the variable's row and set its **Role** to **x**.
-	Click **Confirm variables** and wait for the runs to finish loading.
+3. In **Sweep variables**, select the variable's row and set its **Role** to the desired
+    input position (x, y, facet). Click **Confirm variables** and wait for the runs to 
+    finish loading.
 4. Under **Analysis settings**, select a **Metric**. Keep **Plot** on **Suggested
 	plot** and **Baseline** on **No baseline** for the simplest starting point.
 5. Leave every checkbox in **Phases** and **Turn zones** unchecked. An empty filter

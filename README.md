@@ -4,8 +4,9 @@ Windows workbench for analyzing Canopy simulation sweeps.
 
 ## Install
 
-Download the Windows setup ZIP or EXE from a successful GitLab **package_windows**
-job's artifacts. Ask the maintainer for the approved pipeline/job link.
+Download the Windows setup ZIP or EXE from an approved GitLab **release_windows**
+job's artifacts. **package_windows** outputs are team previews, not production
+downloads. Ask the maintainer for the approved pipeline/job link.
 Corporate Windows x64 devices need approved `uv` tooling, Python 3.13 and network
 access to corporate Artifactory during setup. The app wheel is bundled with the
 release; third-party dependencies come from Artifactory. No company updater or

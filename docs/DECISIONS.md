@@ -125,6 +125,25 @@ reviewable pipeline prepares integration without guessing publisher overrides or
 changing a tested deployment architecture. Artifact retention, access, signing,
 shared-workflow policy and compiler licensing remain company configuration gates.
 
+## ADR-010 - Enforce the documented Windows and production delivery contract
+
+**Status:** Implemented controls; external image, delivery and signing approvals pending.
+
+**Decision:** Require an explicit versioned corporate Windows image for the
+documented container runner. Keep optional same-project MR validation separate
+from protected-branch team previews and a blocking manual protected-tag production
+job declaring `production/windows`. Set explicit artifact access and separate
+preview/production retention. Production requires owner approval and an explicit
+signing policy. Required signing uses an external runner-managed adapter, checks
+the signer/timestamp, signs staged scripts and Inno setup/uninstaller, and finishes
+checksums only afterward. Use the documented corporate Python runtime mirror.
+
+**Reason:** The runner tag does not imply installed workstation tooling. Corporate
+rules treat artifacts usable outside the producing team as production deployments.
+Neither documentation nor successful unsigned builds establish project approval,
+an artifact-retention exception, or access to a signing provider. CI remains
+disabled until these external contracts are supplied and validated.
+
 ## Presentation Evidence To Capture
 
 - Before/after workflow diagram: three hardcoded MATLAB scripts versus one configurable Python application.

@@ -1,13 +1,21 @@
 param(
     [string]$IndexUrl = 'https://artifactory.michelin.com/api/pypi/pypi/simple',
     [switch]$RefreshLock,
-    [switch]$CompileInstaller
+    [switch]$CompileInstaller,
+    [switch]$SignRelease
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $env:UV_SYSTEM_CERTS = '1'
+if (-not $env:UV_PYTHON_INSTALL_MIRROR) {
+    $env:UV_PYTHON_INSTALL_MIRROR = 'https://artifactory.michelin.com/artifactory/github-generic/astral-sh/python-build-standalone/releases/download'
+}
+$index = [uri]$IndexUrl
+if ($index.Scheme -ne 'https' -or $index.UserInfo) { throw 'Use an HTTPS dependency index without embedded credentials' }
 $root = Split-Path $PSScriptRoot -Parent
+$signingWrapper = Join-Path $root 'ci\sign_artifact.ps1'
+if ($SignRelease) { & $signingWrapper -CheckConfiguration }
 $lock = Join-Path $root 'src\canopy_processor\runtime-requirements.txt'
 $uvCommand = Get-Command uv.exe -ErrorAction SilentlyContinue
 $uv = if ($uvCommand) { $uvCommand.Source } else { $null }
@@ -52,6 +60,13 @@ try {
     Copy-Item -Path (Join-Path $root 'ci\*.ps1') -Destination (Join-Path $buildSource 'ci')
     Get-ChildItem -Path (Join-Path $root 'tests\test_*.py') -File |
         Copy-Item -Destination (Join-Path $buildSource 'tests')
+    if ($SignRelease) {
+        foreach ($directory in @('installer', 'ci')) {
+            Get-ChildItem -LiteralPath (Join-Path $buildSource $directory) -Filter '*.ps1' -File | ForEach-Object {
+                & $signingWrapper -Path $_.FullName -Kind Script
+            }
+        }
+    }
     & $uv build $buildSource --index-url $IndexUrl --out-dir $buildOutput
     if ($LASTEXITCODE -ne 0) { throw 'Wheel/sdist build failed' }
     $wheel = Join-Path $buildOutput "canopy_exploration_processor-$version-py3-none-any.whl"
@@ -76,7 +91,7 @@ try {
     $bundle = Join-Path $staging $bundleName
     New-Item -ItemType Directory -Force -Path $bundle | Out-Null
     foreach ($file in @('deployment.ps1', 'setup_environment.bat', 'CanopyExplorationStart.bat', 'remove_environment.bat')) {
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $bundle
+        Copy-Item -LiteralPath (Join-Path $buildSource "installer\$file") -Destination $bundle
     }
     Copy-Item -LiteralPath (Join-Path $root 'docs\DISTRIBUTION.md') -Destination $bundle
     New-Item -ItemType Directory -Path (Join-Path $bundle 'payload') | Out-Null
@@ -95,8 +110,16 @@ try {
         }
         if (-not $compilerPath) { throw 'Install approved Inno Setup 6 to compile the Windows installer' }
         if (-not (Test-Path -LiteralPath $compilerPath)) { throw 'Install approved Inno Setup 6 to compile the Windows installer' }
-        & $compilerPath "/DMyAppVersion=$version" "/DMyPayloadDir=$(Join-Path $bundle 'payload')" "/O$assets" (Join-Path $PSScriptRoot 'CanopyExplorationProcessor.iss')
+        $compilerArguments = @("/DMyAppVersion=$version", "/DMyPayloadDir=$(Join-Path $bundle 'payload')", "/O$assets")
+        if ($SignRelease) {
+            $signCommand = 'powershell.exe -NoProfile -NonInteractive -File $q' + $signingWrapper + '$q -Path $f -Kind Executable'
+            $compilerArguments += @('/DMySignedRelease', ('/Scanopy=' + $signCommand))
+        }
+        & $compilerPath @compilerArguments (Join-Path $buildSource 'installer\CanopyExplorationProcessor.iss')
         if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
+        if ($SignRelease) {
+            & $signingWrapper -Path (Join-Path $assets "CanopyExplorationProcessor-$version-Setup.exe") -Kind Executable -VerifyOnly
+        }
     }
     $checksums = Get-ChildItem -LiteralPath $assets -File | Sort-Object Name | ForEach-Object {
         (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $_.Name

@@ -23,6 +23,10 @@ WizardStyle=modern
 CloseApplications=no
 RestartApplications=no
 UninstallDisplayName=Canopy Exploration Processor
+#ifdef MySignedRelease
+SignTool=canopy
+SignedUninstaller=yes
+#endif
 
 [Files]
 Source: "deployment.ps1"; DestDir: "{app}"; Flags: ignoreversion

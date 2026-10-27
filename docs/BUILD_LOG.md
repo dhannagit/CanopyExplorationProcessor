@@ -2,6 +2,28 @@
 
 This is the chronological engineering record for the Python migration. Keep entries concise and factual. Each entry should capture what changed, why it changed, how it was verified, and what comes next.
 
+## 2026-10-27 - Documentation-driven GitLab delivery controls
+
+**Goal:** Implement documented Windows-container and production-deployment controls
+without inventing company image, artifact-retention or signing approvals.
+
+**Changed:** Added a required versioned corporate Windows image, optional same-project
+MR validation, restricted seven-day team previews and an approved blocking manual
+protected-tag production job declaring `production/windows`. Added explicit signing
+policy, staged script/EXE/uninstaller signing adapter with signer/timestamp checks,
+the corporate runtime mirror, and updated rollout instructions for MR-only branches.
+
+**Evidence:** Focused CI/installer tests passed, including mocked Authenticode
+acceptance/rejection. Documentation PowerShell examples parsed successfully. These
+checks do not establish an actual signing-provider or Windows-container run. Full
+locked local CI validation passed all 134 tests. Unsigned preview packaging compiled
+the EXE, verified hashes and passed fresh production-lock installation/Qt smoke
+validation and removal. Required signing without an adapter fails before building.
+
+**Next:** Supply/approve the Windows image and account bootstrap, artifact audience
+and retention, production project settings and signing adapter if required. Validate
+expanded CI in GitLab. CI stays disabled and no remote deployment was performed.
+
 ## 2026-10-27 - GitLab artifact CI foundation
 
 **Goal:** Prepare corporate GitLab builds and job-artifact delivery without Generic

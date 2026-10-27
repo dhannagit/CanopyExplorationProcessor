@@ -114,20 +114,39 @@ jobs through supported overrides before enabling them.
 
 Ask the runner/tooling owner to confirm:
 
-1. The approved Windows runner tag and executor/shell. `az-weu-wind` is the current
-   default; override it if the approved runner uses another tag. No container image
-   is selected because the runner/image contract has not been confirmed. A Docker
-   executor requires a company-approved Windows image with the tools below.
-2. `uv` and Python 3.13 are available to the **runner service account**. Preflight
-   uses `uv python find --offline 3.13`; it does not download a runtime silently.
+1. The documented `az-weu-wind` runner uses **Windows containers**, not a configured
+   workstation. Set `CANOPY_WINDOWS_IMAGE` to a company-approved Windows image in
+   `docker.artifactory.michelin.com`, pinned by version tag or SHA-256 digest. Empty,
+   unversioned, non-corporate and `latest` references are rejected. No default image
+   is invented: the docs do not identify a suitable Python 3.13/uv/Inno image.
+   The container base OS must match the runner's requirements.
+2. The image contains approved `uv`, Python 3.13, PowerShell and CIM process-query
+   support. Preflight uses `uv python find --offline 3.13`; it does not install missing
+   tools into the runner. An approved dedicated shell runner is an alternative,
+   but requires separate CI review rather than just changing the tag. Dedicated
+   registration must include `dedicated-<app_trigram>`; its team owns maintenance
+   and the documented shell is `powershell`.
 3. Corporate Artifactory authentication, proxy and CA trust work for that account,
    including the registry dependencies and build backend. Keep secrets in approved
    service/CI configuration, not the repository or index URL. Index URLs are recorded
    in release metadata and must not contain credentials.
 4. If EXE builds are approved, licensed Inno Setup 6 and any required signing
    service are available. The first run can build ZIP-only artifacts instead.
-5. Executable job artifacts, their project access permissions and retention are
-   approved. No executable Generic Package Registry publishing is configured.
+5. Artifact-only distribution, classification, audience and retention are explicitly
+   approved. General company guidance uses Artifactory for binaries; it does not
+   establish an exception for durable GitLab job-artifact delivery. Absence of an
+   executable prohibition is not approval. No executable Generic Package Registry
+   publishing is configured or proposed here.
+
+The documented uv runtime mirror is configured through `UV_PYTHON_INSTALL_MIRROR`:
+`https://artifactory.michelin.com/artifactory/github-generic/astral-sh/python-build-standalone/releases/download`.
+Setup uses it if runtime provisioning is needed; CI itself still expects Python in
+the image. `UV_SYSTEM_CERTS=1` uses installed trust, not a CA installer. Image-pull
+and dependency-read authorization must work in every job context.
+
+The documented Vault dynamic-Artifactory-token flow requires WEU `rk8svcs0`
+Kubernetes runners. It is not a Windows bootstrap. Use an approved Windows-compatible
+authentication method; do not transfer tokens as artifacts or embed them in images.
 
 ### Step B: Create The GitLab Project
 
@@ -137,9 +156,19 @@ used to import a repository is not required inside these jobs; GitLab supplies j
 credentials for checkout and artifact upload. Importing source does not configure
 runners, variables, protected refs or Sonar settings.
 
-Protect the default branch and intended release tags, for example `v*`. The pipeline
-refuses unprotected refs. Keep the company template ZIP/extracted copy as local
-reference only; they are ignored, not packaged into the app.
+For DRIVE-scope projects, configure the documented mandatory controls:
+
+1. Add `trigram-xxx` using the actual three-character application identifier.
+2. Protect default/environment-linked branches with **Allowed to push: No one**.
+   Changes go through reviewed merge requests, not direct pushes to `main`.
+3. Keep Environments enabled and protect `production/windows` for authorized release
+   operators. The production job declares this environment.
+
+Protect intended release tags such as `v*` too. If outside DRIVE, confirm applicable
+controls with the owner; these remain recommended safeguards. Any artifact usable
+outside the producing team counts as production, including desktop installers.
+Preview artifacts must remain within that team. Template ZIP/extracted files stay
+local reference only; repository import does not configure these controls.
 
 ### Step C: Set Project CI Variables
 
@@ -150,20 +179,36 @@ Project-level values override the safe defaults in `.gitlab-ci.yml`.
 | --- | --- | --- |
 | `CANOPY_CI_ENABLED` | `false` | Set to `true` only after runner, policy and CI configuration review. |
 | `CANOPY_WINDOWS_RUNNER_TAG` | `az-weu-wind` | Set to the confirmed approved Windows runner tag. |
+| `CANOPY_WINDOWS_IMAGE` | empty | Required approved versioned Windows image; no pipeline starts without it. |
+| `CANOPY_MR_VALIDATION_ENABLED` | `false` | Enable same-project MR checks only with safe non-production image/dependency access. Fork MR pipelines remain excluded. |
 | `CANOPY_COMPILE_INSTALLER` | `false` | Set to `true` only for approved Inno EXE builds; otherwise build ZIP/package assets. |
 | `CANOPY_FULL_TESTS` | `false` | Set to `true` only after all approved sample datasets are available in the checkout. |
+| `CANOPY_RELEASE_APPROVED` | `false` | Protected owner approval of packaging, artifact delivery, audience and retention. |
+| `CANOPY_SIGNING_POLICY` | `unset` | Protected owner decision: `required` or `not-required`; unset blocks production. |
+| `CANOPY_RELEASE_RETENTION` | `90 days` | Set approved production artifact expiry; the default is not an approval. |
+
+If signing is required, set `CANOPY_SIGNING_SCRIPT` to the absolute path of an
+approved runner-managed PowerShell adapter and `CANOPY_SIGNER_THUMBPRINT` to its
+expected certificate's 40-character thumbprint. Keep credentials in the approved
+signing service/secret mechanism, never command arguments or artifacts. Step 5
+defines the adapter interface.
 
 Use protected variables/secrets where appropriate. This file intentionally does not
 copy template credentials or invoke a secret downloader. Recipient dependency access
 must also work independently of CI; no CI credentials are embedded in installers.
+MR validation must not need protected production secrets or a privileged signing
+identity. Non-secret enable/image/MR switches must be available to MR pipelines.
+Protected-only runners or image credentials may not serve unprotected MR refs;
+obtain an approved safe access path before enabling this feature.
 
 ### Step D: Validate And Run
 
 Use GitLab's CI editor/CI Lint to validate the configuration on your company instance.
 This YAML has been parsed/tested locally, not remotely linted or run on your GitLab.
-With CI enabled and a protected default branch, run a pipeline through
+With CI enabled, an approved image and a protected default branch, run a pipeline through
 **Build > Pipelines > New pipeline** (the exact label can vary). Subsequent pushes
-to that branch and protected `v<version>` tags also create pipelines.
+to that branch and protected `v<version>` tags also create pipelines. Enable
+same-project MR pipelines separately only after their credential/access review.
 
 The jobs run in this order:
 
@@ -173,13 +218,24 @@ The jobs run in this order:
    and produce `reports/junit.xml`. By default this explicitly selects tests without
    external datasets; it is not a full numerical parity gate. Full tests require
    approved fixtures, not a copy committed to the repo or uploaded as artifacts.
-3. `package_windows`: build ZIP/package assets and optionally EXE, verify checksums,
+3. `package_windows`: on the protected default branch only, build team-preview
+   ZIP/package assets and optionally EXE, verify checksums,
    install the ZIP in a temporary environment with its production dependency lock,
    run the installed Qt/native-library smoke check and remove that test install.
+   It does not run on MR/tag pipelines or declare production.
+4. `release_windows`: for matching protected version tags, an authorized operator
+   manually starts production packaging after tests. The job exists only with
+   release approval and explicit signing policy. It declares `production/windows`,
+   applies required signing and runs the same artifact/install validation. This is
+   a blocking manual deployment, not automatic production delivery on branch pushes.
 
-Only successful package jobs upload `dist/releases/`, with a name containing the
-ref and commit. JUnit reports are kept for 30 days; package artifacts for 90 days,
-subject to instance policy. Approve an appropriate retention period before release.
+Only successful package/release jobs upload `dist/releases/`. Preview artifacts
+expire after seven days; JUnit/preflight reports after 30 days. Production expiry
+uses `CANOPY_RELEASE_RETENTION`, subject to instance policy. All artifacts require
+Developer-or-higher access in the YAML. This does not distinguish producing-team
+members from other Developers: restrict project membership accordingly. Do not
+grant extra repository permissions simply to bypass an artifact-download failure.
+Agree an appropriate audience/access mechanism and retention before distribution.
 Use GitLab's supported **Keep** action where permitted. A GitLab Release link to
 an artifact does not stop that artifact expiring or grant access to nonmembers.
 
@@ -193,7 +249,8 @@ Local CI equivalents, from the repository root:
 
 These commands use the same environment switches; for example, set
 `$env:CANOPY_COMPILE_INSTALLER = 'true'` only when intentionally testing the EXE
-route. The existing embedded production dependency lock is distinct from the
+route. Local invocations are validation/preview by default, not proof of production
+approval or a container run. The existing embedded production dependency lock is distinct from the
 development `uv.lock`. Do not routinely refresh either during a release build.
 
 ## Build A Release
@@ -292,11 +349,31 @@ future integration; no host-tool/plugin framework is implemented now.
 
 ### Step 5: Apply Required Signing
 
-If IT requires script signing, sign the final scripts **before Step 4** so signed
-copies enter both the ZIP and EXE. Sign the compiled EXE afterward using the
-approved certificate/service and timestamp server. Editing signed files breaks
-their signatures. Signing setup does not automatically sign its generated
-uninstaller; that requires separate Inno signing configuration.
+Production requires an explicit signing decision. For `not-required`, record the
+owner's approval rather than inferring it from an unsigned local build. For
+`required`, the configured company adapter receives `-Path <absolute-file>` and
+`-Kind Script` or `-Kind Executable`. It must sign non-interactively through the
+approved provider using a trusted certificate and timestamp, returning success
+only when complete. Do not print credentials. No provider or certificate is supplied
+by this repository.
+
+`ci/sign_artifact.ps1` verifies configuration, Authenticode status, the expected
+certificate thumbprint and a timestamp. The builder signs only staged PowerShell
+copies before they enter the ZIP/source archive; it does not modify source files.
+Inno's signing tool signs the generated uninstaller and setup EXE through the same
+wrapper. Final checksums are generated afterward. Missing adapters, invalid
+signatures or wrong signers fail the build, rather than producing unsigned output.
+
+To exercise an approved signing setup locally, configure the adapter/certificate
+settings through the approved mechanism, then run:
+
+```powershell
+.\installer\build_release.ps1 -CompileInstaller -SignRelease
+```
+
+Editing a signed file invalidates its signature. Changing the signing policy or
+signer requires review. This path still needs an actual company-provider test;
+mocked checks validate rejection behavior, not a real signing-service run.
 
 If an EXE changes after the build, regenerate checksums in the upload folder:
 
@@ -369,15 +446,17 @@ Acceptance Checklist below to record exactly what was tested.
 
 ### Step 8: Commit And Tag The Tested Source
 
-Review changes in VS Code Source Control, commit the intended source/documentation
-changes, and push that commit. Do not commit local datasets, credentials, `.venv`
+Review changes in VS Code Source Control, commit on a working branch, push it and
+open a merge request. Review/test/merge it under the project's protection rules;
+do not push directly to the protected default branch. Do not commit datasets, credentials, `.venv`
 or generated release files. Confirm the repository visibility is appropriate for
 company code and that the assets match the source being tagged.
 
 A tag names the exact commit behind a release. Push the tested commit to your
 company project first. If it is a separate remote named `gitlab`, use that name
 instead of `origin`. Check existing tags before creating one; never force-move a
-published tag. After pushing the tested commit:
+published tag. After the reviewed commit is merged, update your local release
+branch without rewriting history and tag the exact tested commit:
 
 ```powershell
 git tag -a "v$version" -m "Canopy Exploration Processor $version"
@@ -391,7 +470,9 @@ and rebuild if the existing version was published.
 
 1. Open **Build > Pipelines** in the company GitLab project.
 2. Select the pipeline for the intended tag/commit and confirm all jobs succeeded.
-3. Open `package_windows`, then find **Job artifacts > Browse** or **Download**.
+3. For production, start the approved blocking manual `release_windows` job and
+   wait for success. Open it, then find **Job artifacts > Browse** or **Download**.
+   `package_windows` is for producing-team previews only.
 4. Download the EXE or Windows setup ZIP and `SHA256SUMS.txt`. Downloading all job
    artifacts gives an outer archive containing `dist/releases/v<version>/`.
 5. Verify hashes and perform the normal-user test before sharing the job URL.
@@ -422,7 +503,7 @@ build scripts never commit, tag or upload. No GitLab token is stored in the app.
 
 These are the steps to give teammates who are not building the app:
 
-1. Open the approved GitLab package-job artifact link and download the EXE or Windows-x64 ZIP,
+1. Open the approved GitLab production release-job artifact link and download the EXE or Windows-x64 ZIP,
    plus `SHA256SUMS.txt`. Compare the download's `Get-FileHash -Algorithm SHA256`
    result with its line in that file.
 2. Connect to the corporate network so setup can retrieve Python dependencies.
@@ -511,7 +592,9 @@ approved corporate tooling interactively if IT needs detailed repository errors.
 | Missing manifest/checksum mismatch | Download the complete release again. Do not edit the manifest to hide an error. |
 | Workbook unavailable offline | Confirm OneDrive has downloaded it and verify File > Settings. Network-drive data may also be unavailable. |
 | Test cleanup permission error | Use the unique `--basetemp` command in Step 3, not an older admin-created temp directory. |
-| No GitLab pipeline appears | Confirm `CANOPY_CI_ENABLED=true`, a protected ref, and a default-branch push/web pipeline or matching protected version tag. |
+| No GitLab pipeline appears | Confirm CI enabled, an approved image variable, and an allowed protected-ref or explicitly enabled same-project MR pipeline. |
+| Production job is absent | Confirm protected matching version tag, release approval and explicit signing policy; default-branch builds are previews only. |
+| Signing fails | Confirm the absolute approved adapter path, expected thumbprint, timestamp and corporate trust. Do not disable required signing to bypass failure. |
 | CI job stays pending | Confirm the runner tag, runner/project permission, protected-runner settings and Windows executor/image with IT. |
 | CI tests pass but full data scenarios are absent | Default jobs intentionally exclude external fixtures. Provision approved data and enable `CANOPY_FULL_TESTS`. |
 | Artifact download expired/denied | Check job retention/Keep policy and project membership. A Release link cannot bypass either. |
@@ -523,6 +606,9 @@ describe the release as fully validated when a required scenario is outstanding.
 
 - [ ] Correct version, matching source commit/tag, final assets and valid checksums.
 - [ ] GitLab CI lint/expanded configuration reviewed; approved runner, protected refs and artifact access/retention configured.
+- [ ] DRIVE applicability/topic/MR-only branches checked; production environment and protected-tag manual deployment configured.
+- [ ] Approved versioned Windows image includes Python/uv/CA/compiler; Windows-compatible authentication verified without production secrets in MR jobs.
+- [ ] Artifact-only delivery agreed with the owner; preview audience restricted; signing decision and any real-provider validation recorded.
 - [ ] No executable Generic Package Registry publishing or embedded CI/import credentials.
 - [ ] Automated setup/settings tests and available full regression suites passed.
 - [ ] Fresh EXE and/or ZIP setup tested as a normal user on a corporate device.

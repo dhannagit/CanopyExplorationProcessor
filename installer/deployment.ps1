@@ -17,6 +17,9 @@ $LogDirectory = Join-Path $env:LOCALAPPDATA 'CanopyExplorationProcessor\logs'
 New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
 $LogPath = Join-Path $LogDirectory 'deployment.log'
 $env:UV_SYSTEM_CERTS = '1'
+if (-not $env:UV_PYTHON_INSTALL_MIRROR) {
+    $env:UV_PYTHON_INSTALL_MIRROR = 'https://artifactory.michelin.com/artifactory/github-generic/astral-sh/python-build-standalone/releases/download'
+}
 $env:UV_HTTP_TIMEOUT = '15'
 $env:UV_HTTP_RETRIES = '1'
 $env:UV_NO_PROGRESS = '1'

@@ -2,13 +2,20 @@ stages:
   - preflight
   - test
   - package
+  - release
 
 variables:
   CANOPY_CI_ENABLED: "false"
   CANOPY_WINDOWS_RUNNER_TAG: "az-weu-wind"
+  CANOPY_WINDOWS_IMAGE: ""
+  CANOPY_MR_VALIDATION_ENABLED: "false"
+  CANOPY_RELEASE_APPROVED: "false"
+  CANOPY_SIGNING_POLICY: "unset"
+  CANOPY_RELEASE_RETENTION: "90 days"
   CANOPY_COMPILE_INSTALLER: "false"
   CANOPY_FULL_TESTS: "false"
   UV_SYSTEM_CERTS: "1"
+  UV_PYTHON_INSTALL_MIRROR: "https://artifactory.michelin.com/artifactory/github-generic/astral-sh/python-build-standalone/releases/download"
   UV_PROJECT_ENVIRONMENT: "$CI_PROJECT_DIR/.ci-venv"
   QT_QPA_PLATFORM: "offscreen"
 
@@ -16,6 +23,9 @@ workflow:
   rules:
     - if: '$CANOPY_CI_ENABLED != "true"'
       when: never
+    - if: '$CANOPY_WINDOWS_IMAGE == null || $CANOPY_WINDOWS_IMAGE == ""'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CANOPY_MR_VALIDATION_ENABLED == "true" && $CI_MERGE_REQUEST_SOURCE_PROJECT_ID == $CI_PROJECT_ID'
     - if: '$CI_COMMIT_REF_PROTECTED != "true"'
       when: never
     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
@@ -23,6 +33,8 @@ workflow:
     - when: never
 
 default:
+  image:
+    name: "$CANOPY_WINDOWS_IMAGE"
   tags:
     - "$CANOPY_WINDOWS_RUNNER_TAG"
   timeout: 30 minutes
@@ -32,6 +44,7 @@ runner_preflight:
   script:
     - powershell.exe -NoProfile -NonInteractive -File .\ci\run.ps1 -Phase Preflight
   artifacts:
+    access: developer
     expire_in: 30 days
     paths:
       - reports/ci-context.txt
@@ -44,6 +57,7 @@ test_windows:
   script:
     - powershell.exe -NoProfile -NonInteractive -File .\ci\run.ps1 -Phase Test
   artifacts:
+    access: developer
     when: always
     expire_in: 30 days
     reports:
@@ -58,9 +72,40 @@ package_windows:
       artifacts: false
   script:
     - powershell.exe -NoProfile -NonInteractive -File .\ci\run.ps1 -Phase Package
+  variables:
+    CANOPY_BUILD_KIND: "preview"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+    - when: never
   artifacts:
+    access: developer
     name: "Canopy-$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
     when: on_success
-    expire_in: 90 days
+    expire_in: 7 days
+    paths:
+      - dist/releases/
+
+release_windows:
+  stage: release
+  needs:
+    - job: test_windows
+      artifacts: false
+  variables:
+    CANOPY_BUILD_KIND: "production"
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/ && $CI_COMMIT_REF_PROTECTED == "true" && $CANOPY_RELEASE_APPROVED == "true" && ($CANOPY_SIGNING_POLICY == "required" || $CANOPY_SIGNING_POLICY == "not-required")'
+      when: manual
+      allow_failure: false
+    - when: never
+  environment:
+    name: production/windows
+    deployment_tier: production
+  script:
+    - powershell.exe -NoProfile -NonInteractive -File .\ci\run.ps1 -Phase Package
+  artifacts:
+    access: developer
+    name: "Canopy-$CI_COMMIT_TAG-$CI_COMMIT_SHORT_SHA"
+    when: on_success
+    expire_in: "$CANOPY_RELEASE_RETENTION"
     paths:
       - dist/releases/

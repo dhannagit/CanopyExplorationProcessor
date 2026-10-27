@@ -11,6 +11,21 @@ function Test-ReleaseVersion([string]$Version, [string]$Tag) {
     if ($Tag -and $Tag -ne "v$Version") { throw 'CI tag must match the version in pyproject.toml' }
 }
 
+function Test-RunnerImage([string]$Image) {
+    if ($Image -notmatch '^docker\.artifactory\.michelin\.com/[a-z0-9][a-z0-9_./-]*(?::[A-Za-z0-9_][A-Za-z0-9_.-]*|@sha256:[a-fA-F0-9]{64})$' -or $Image -match ':latest$') {
+        throw 'Set CANOPY_WINDOWS_IMAGE to an approved versioned Windows image in corporate Artifactory'
+    }
+}
+
+function Test-ProductionPolicy([string]$Kind, [string]$Tag, [string]$Protected, [string]$Approved, [string]$SigningPolicy) {
+    if ($Kind -ne 'production') { return $false }
+    if ($Tag -notmatch '^v\d+\.\d+\.\d+$' -or $Protected -ne 'true' -or $Approved -ne 'true') {
+        throw 'Production artifacts require an approved protected version tag'
+    }
+    if ($SigningPolicy -notin @('required', 'not-required')) { throw 'Set the approved production signing policy explicitly' }
+    return $SigningPolicy -eq 'required'
+}
+
 function Get-TestArguments([bool]$FullSuite) {
     if ($FullSuite) { return @('-m', 'pytest') }
     return @(
@@ -82,7 +97,15 @@ Push-Location $root
 try {
     if ($env:OS -ne 'Windows_NT' -or -not [Environment]::Is64BitProcess) { throw 'CI requires a Windows x64 PowerShell runner' }
     if ($env:UV_INSECURE_HOST) { throw 'CI must use approved certificate trust, not UV_INSECURE_HOST' }
+    if ($env:CI -eq 'true') {
+        Test-RunnerImage $env:CANOPY_WINDOWS_IMAGE
+        if ($env:CI_JOB_IMAGE -and $env:CI_JOB_IMAGE -ne $env:CANOPY_WINDOWS_IMAGE) { throw 'Runner image differs from the configured Windows image' }
+        Get-CimInstance Win32_Process -Filter "ProcessId = $PID" -ErrorAction Stop | Out-Null
+    }
     $env:UV_SYSTEM_CERTS = '1'
+    if (-not $env:UV_PYTHON_INSTALL_MIRROR) {
+        $env:UV_PYTHON_INSTALL_MIRROR = 'https://artifactory.michelin.com/artifactory/github-generic/astral-sh/python-build-standalone/releases/download'
+    }
     $uv = Get-CiUv
     $pythonOutput = & $uv python find --offline 3.13
     if ($LASTEXITCODE -ne 0) { throw 'Provision approved Python 3.13 for the runner before enabling CI' }
@@ -90,6 +113,10 @@ try {
     $version = (& $python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])").Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Could not read the project version' }
     Test-ReleaseVersion $version $env:CI_COMMIT_TAG
+    $buildKind = $env:CANOPY_BUILD_KIND
+    if ($env:CI -eq 'true' -and $env:CI_ENVIRONMENT_TIER -eq 'production') { $buildKind = 'production' }
+    $signRelease = Test-ProductionPolicy $buildKind $env:CI_COMMIT_TAG $env:CI_COMMIT_REF_PROTECTED $env:CANOPY_RELEASE_APPROVED $env:CANOPY_SIGNING_POLICY
+    if ($signRelease) { & (Join-Path $PSScriptRoot 'sign_artifact.ps1') -CheckConfiguration }
     $compileInstaller = $env:CANOPY_COMPILE_INSTALLER -eq 'true'
     if ($compileInstaller) {
         $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
@@ -104,7 +131,8 @@ try {
         'Preflight' {
             @(
                 "version=$version", "commit=$env:CI_COMMIT_SHA", "phase=$Phase",
-                "compile_installer=$compileInstaller", "full_tests=$($env:CANOPY_FULL_TESTS -eq 'true')"
+                "compile_installer=$compileInstaller", "full_tests=$($env:CANOPY_FULL_TESTS -eq 'true')",
+                "build_kind=$buildKind", "signing_required=$signRelease"
             ) | Set-Content -LiteralPath reports/ci-context.txt -Encoding UTF8
             Write-Output 'Windows, uv, Python, tag/version and optional compiler preflight passed. Corporate index access is checked during dependency installation.'
         }
@@ -124,7 +152,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'CI test suite failed' }
         }
         'Package' {
-            & (Join-Path $root 'installer\build_release.ps1') -CompileInstaller:$compileInstaller
+            & (Join-Path $root 'installer\build_release.ps1') -CompileInstaller:$compileInstaller -SignRelease:$signRelease
             if ($LASTEXITCODE -ne 0) { throw 'CI release build failed' }
             $assets = Join-Path $root "dist\releases\v$version"
             Test-ArtifactChecksums $assets

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from copy import deepcopy
 
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
-from .config import AnalysisConfig
+from .config import AnalysisConfig, EXPORT_ASPECT_RATIOS
 
 
 def export_analysis(
@@ -29,11 +31,26 @@ def export_analysis(
 
 	output_directory = config.export.output_directory
 	output_directory.mkdir(parents=True, exist_ok=True)
+	export_figure = figure
+	ratio = EXPORT_ASPECT_RATIOS[config.export.aspect_ratio]
+	if ratio is not None:
+		export_figure = deepcopy(figure)
+		FigureCanvasAgg(export_figure)
+		width, height = figure.get_size_inches()
+		if width / height > ratio:
+			width = height * ratio
+		else:
+			height = width / ratio
+		export_figure.set_size_inches(width, height, forward=False)
+		export_figure.tight_layout()
 
 	paths: list[Path] = []
 	for export_format in config.export.formats:
 		output_path = output_directory / f"{filename}.{export_format}"
 		if export_format in {"svg", "png"}:
-			figure.savefig(output_path, dpi=300, bbox_inches="tight")
+			export_figure.savefig(
+				output_path, dpi=300,
+				bbox_inches="tight" if ratio is None else export_figure.bbox_inches.frozen(),
+			)
 		paths.append(output_path)
 	return paths

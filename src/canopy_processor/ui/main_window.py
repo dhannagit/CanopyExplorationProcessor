@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 )
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
-from ..config import AnalysisConfig, BaselineConfig, DatasetConfig, ExportConfig, FilterConfig, PlotConfig, SweepVariableConfig
+from ..config import AnalysisConfig, BaselineConfig, DatasetConfig, ExportConfig, FilterConfig, PlotConfig, SweepVariableConfig, EXPORT_ASPECT_RATIOS
 from ..exporting import export_analysis
 from .discovery import DiscoveryResult, discover_dataset
 from .pipeline import (
@@ -62,12 +62,74 @@ QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; color:
 QPushButton { background: #24333b; border: 1px solid #42616b; padding: 7px 12px; }
 QPushButton:hover { background: #2d4852; border-color: #74d7e8; }
 QPushButton#applyButton { background: #187a8e; border-color: #74d7e8; font-weight: 700; }
+QMenu { background: #151a20; border: 1px solid #303b45; padding: 4px; }
+QMenu::item { padding: 6px 40px 6px 24px; }
+QMenu::item:selected { background: #2d4852; }
+QMenu::separator { height: 1px; background: #303b45; margin: 4px 8px; }
 QComboBox, QListWidget, QTableWidget, QTextEdit { background: #10151a; border: 1px solid #303b45; padding: 5px; }
 QLabel#title { color: #74d7e8; font-size: 20px; font-weight: 700; }
 QLabel#muted { color: #8c9aa5; }
 QProgressBar { border: 1px solid #303b45; text-align: center; }
 QProgressBar::chunk { background: #20a8bd; }
 """
+
+
+class SweepVariableTable(QTableWidget):
+	"""Keep user-adjusted column proportions when the viewport changes size."""
+
+	def __init__(self) -> None:
+		super().__init__(0, 4)
+		self._column_weights = [0.55, 0.10, 0.25, 0.10]
+		self._resizing_columns = False
+		header = self.horizontalHeader()
+		header.setMinimumSectionSize(55)
+		header.setSectionResizeMode(QHeaderView.Interactive)
+		header.sectionResized.connect(self._column_resized)
+
+	def _column_resized(self, column: int, old_size: int, new_size: int) -> None:
+		if self._resizing_columns:
+			return
+		count = self.columnCount()
+		minimum = self.horizontalHeader().minimumSectionSize()
+		available = max(self.viewport().width(), minimum * count)
+		widths = [self.columnWidth(index) for index in range(count)]
+		widths[column] = min(max(minimum, new_size), available - minimum * (count - 1))
+		neighbors = list(range(column + 1, count)) + list(range(column - 1, -1, -1))
+		excess = sum(widths) - available
+		for neighbor in neighbors:
+			reduction = min(widths[neighbor] - minimum, max(0, excess))
+			widths[neighbor] -= reduction
+			excess -= reduction
+		if excess < 0 and neighbors:
+			widths[neighbors[0]] -= excess
+		self._resizing_columns = True
+		try:
+			for index, width in enumerate(widths):
+				self.setColumnWidth(index, width)
+		finally:
+			self._resizing_columns = False
+		extra = available - minimum * count
+		if extra:
+			self._column_weights = [(width - minimum) / extra for width in widths]
+
+	def resizeEvent(self, event) -> None:
+		super().resizeEvent(event)
+		if not hasattr(self, "_column_weights"):
+			return
+		minimum = self.horizontalHeader().minimumSectionSize()
+		width = self.viewport().width()
+		extra = max(0, width - minimum * self.columnCount())
+		self._resizing_columns = True
+		try:
+			remaining = width
+			for column, weight in enumerate(self._column_weights):
+				size = minimum + round(extra * weight)
+				if column == self.columnCount() - 1:
+					size = max(minimum, remaining)
+				self.setColumnWidth(column, size)
+				remaining -= size
+		finally:
+			self._resizing_columns = False
 
 
 class MainWindow(QMainWindow):
@@ -90,7 +152,8 @@ class MainWindow(QMainWindow):
 		self.resize(1100, 700)
 		self.setStyleSheet(STYLE)
 		self._build_ui()
-		file_menu = self.menuBar().addMenu("File")
+		self.file_menu = self.menuBar().addMenu("File")
+		file_menu = self.file_menu
 		self.open_action = file_menu.addAction("Open Analysis...", self._open_analysis)
 		self.open_action.setShortcut(QKeySequence.StandardKey.Open)
 		self.save_action = file_menu.addAction("Save", self._save_analysis)
@@ -143,6 +206,7 @@ class MainWindow(QMainWindow):
 		config.export = ExportConfig(
 			Path(self.export_directory.text()).expanduser().resolve() if self.export_directory.text().strip() else None,
 			tuple(name for name, widget in (("svg", self.export_svg), ("png", self.export_png)) if widget.isChecked()),
+			aspect_ratio=self.export_aspect.currentData(),
 		)
 		result = self.session.discovery_result
 		if config.dataset is None and isinstance(result, DiscoveryResult):
@@ -344,6 +408,7 @@ class MainWindow(QMainWindow):
 				self.variable_list.insertRow(row)
 				self.variable_list.setItem(row, 0, QTableWidgetItem(f"Unavailable: {identifier}"))
 			self.export_directory.setText(str(config.export.output_directory or ""))
+			self._restore_combo(self.export_aspect, config.export.aspect_ratio)
 			self.export_svg.setChecked("svg" in config.export.formats)
 			self.export_png.setChecked("png" in config.export.formats)
 			self.workspace_tabs.setCurrentIndex(0)
@@ -464,15 +529,13 @@ class MainWindow(QMainWindow):
 		variables.setObjectName("sweepVariablesGroup")
 		variables.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 		variables_layout = QVBoxLayout(variables)
-		self.variable_list = QTableWidget(0, 4)
+		self.variable_list = SweepVariableTable()
 		self.variable_list.setHorizontalHeaderLabels(["Variable", "Role", "Display name", "Units"])
 		self.variable_list.setSelectionBehavior(QAbstractItemView.SelectRows)
 		self.variable_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
 		self.variable_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
 		self.variable_list.setMinimumHeight(100)
 		self.variable_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-		self.variable_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-		self.variable_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
 		variables_layout.addWidget(self.variable_list)
 		self.confirm_button = QPushButton("Confirm variables")
 		self.confirm_button.setEnabled(False)
@@ -587,6 +650,11 @@ class MainWindow(QMainWindow):
 		self.export_directory.setPlaceholderText("Figure export folder")
 		export_folder_button = QPushButton("Choose export folder")
 		export_folder_button.clicked.connect(self._choose_export_directory)
+		self.export_aspect = QComboBox()
+		self.export_aspect.setAccessibleName("Export aspect ratio")
+		self.export_aspect.setToolTip("Export aspect ratio; size follows the current plot area")
+		for aspect in EXPORT_ASPECT_RATIOS:
+			self.export_aspect.addItem("Window" if aspect == "window" else aspect, aspect)
 		self.export_svg = QCheckBox("SVG")
 		self.export_png = QCheckBox("PNG")
 		self.export_svg.setChecked(True)
@@ -594,7 +662,7 @@ class MainWindow(QMainWindow):
 		self.export_button = QPushButton("Export Figure")
 		self.export_button.setEnabled(False)
 		self.export_button.clicked.connect(self._export_figure)
-		for widget in (self.export_directory, export_folder_button, self.export_svg, self.export_png, self.export_button):
+		for widget in (self.export_directory, export_folder_button, self.export_aspect, self.export_svg, self.export_png, self.export_button):
 			export_layout.addWidget(widget)
 		layout.addLayout(export_layout)
 		return panel
@@ -782,11 +850,19 @@ class MainWindow(QMainWindow):
 		if not selected_rows:
 			self.status_label.setText("Select at least one sweep variable")
 			return
-		self.session.config.dataset = DatasetConfig(
-			dxpx_directory=result.dxpx_directory,
-			raw_directory=result.raw_directory,
-			circuit_workbook=result.circuit_workbook,
+		dataset = self.session.config.dataset
+		reuse_loaded = (
+			isinstance(self.session.loaded_dataset, LoadedDataset) and dataset is not None
+			and dataset.dxpx_directory == result.dxpx_directory
+			and dataset.raw_directory == result.raw_directory
+			and dataset.circuit_workbook == result.circuit_workbook
 		)
+		if not reuse_loaded:
+			self.session.config.dataset = DatasetConfig(
+				dxpx_directory=result.dxpx_directory,
+				raw_directory=result.raw_directory,
+				circuit_workbook=result.circuit_workbook,
+			)
 		self.session.config.sweep_variables = []
 		for row in selected_rows:
 			role_widget = self.variable_list.cellWidget(row, 1)
@@ -800,8 +876,11 @@ class MainWindow(QMainWindow):
 			)
 		self.session.mark_ready()
 		self.confirm_button.setEnabled(False)
-		self.status_label.setText("Loading simulation runs...")
-		self._start_loading(result)
+		if reuse_loaded:
+			self.status_label.setText("Variables confirmed; loaded data and filters preserved. Apply when ready")
+		else:
+			self.status_label.setText("Loading simulation runs...")
+			self._start_loading(result)
 		self._document_changed()
 
 	def _start_loading(self, discovery: DiscoveryResult) -> None:
@@ -1085,9 +1164,15 @@ class MainWindow(QMainWindow):
 			output.plot_data, scatter=config.plot.plot_type == "scatter",
 			annotate=config.plot.annotate, labels=labels,
 		)
-		figure.set_canvas(self.figure_canvas)
-		self.figure_canvas.figure = figure
-		self.figure_canvas.draw()
+		previous_canvas = self.figure_canvas
+		self.figure_canvas = FigureCanvasQTAgg(figure)
+		self.figure_canvas.setMinimumHeight(previous_canvas.minimumHeight())
+		self.figure_canvas.setSizePolicy(previous_canvas.sizePolicy())
+		previous_canvas.parentWidget().layout().replaceWidget(previous_canvas, self.figure_canvas)
+		previous_canvas.hide()
+		previous_canvas.deleteLater()
+		self.figure_canvas.show()
+		self.figure_canvas.draw_idle()
 		self.results_label.setText(f"{output.metric_name}: {len(output.rows)} analyzed run(s)")
 		self._populate_results_table(output)
 		self._populate_comparison_table(output)

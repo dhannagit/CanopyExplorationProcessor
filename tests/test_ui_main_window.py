@@ -6,15 +6,17 @@ from openpyxl import Workbook
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QFileDialog, QGroupBox, QScrollArea, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QGroupBox, QHeaderView, QScrollArea, QMessageBox
 from PySide6.QtCore import QPoint, Qt, QEventLoop, QTimer
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtTest import QTest
 
 from canopy_processor.ui.main_window import MainWindow
-from canopy_processor.ui.pipeline import LoadedDataset
+from canopy_processor.ui.pipeline import LoadedDataset, analyze_loaded_dataset
 from canopy_processor.ui.discovery import DiscoveryResult
 from canopy_processor import AnalysisConfig, BaselineConfig, DatasetConfig, FilterConfig, PlotConfig, SweepVariable, SweepVariableConfig
 from canopy_processor.ui.settings import RESOURCE_DIRECTORY_KEY
+from canopy_processor.ui.session import SessionState
 from canopy_processor.dxpx import DXPXRun
 from canopy_processor.metric import source_metric
 from PySide6.QtCore import QSettings
@@ -47,6 +49,11 @@ def test_main_window_builds_workbench() -> None:
 	application.processEvents()
 	assert not isinstance(window.workspace_tabs.widget(0), QScrollArea)
 	assert window.workspace_tabs.count() == 3
+	export_row = window.workspace_tabs.widget(1).layout().itemAt(3).layout()
+	assert export_row.itemAt(1).widget().text() == "Choose export folder"
+	assert export_row.itemAt(2).widget() is window.export_aspect
+	assert export_row.itemAt(3).widget() is window.export_svg
+	assert export_row.itemAt(4).widget() is window.export_png
 	assert [window.workspace_tabs.tabText(index) for index in range(3)] == [
 		"Analysis", "Results", "Comparison"
 	]
@@ -74,6 +81,161 @@ def test_main_window_builds_workbench() -> None:
 	window.close()
 	application.processEvents()
 	del window
+	application.processEvents()
+
+
+@pytest.mark.parametrize("render_tab", [0, 1])
+def test_repeated_figures_fit_canvas_without_window_resize(tmp_path: Path, render_tab: int) -> None:
+	application = QApplication.instance() or QApplication([])
+	window = MainWindow()
+	config = AnalysisConfig(
+		dataset=DatasetConfig(tmp_path, tmp_path), metric="grip",
+		sweep_variables=[SweepVariableConfig("pressure", role="x")],
+	)
+	window.session.config = config
+	run = DXPXRun(tmp_path / "0" / "run.dxpx", {}, {
+		"sLap": np.array([0., 1.]), "grip": np.array([1., 2.]),
+	})
+	loaded = LoadedDataset((run,), {"grip": source_metric("grip", "Grip", "grip", "g")}, ())
+	output = analyze_loaded_dataset(loaded, config, (SweepVariable("pressure", "bar", (1.,)),))
+	window.resize(1400, 1000)
+	window.workspace_tabs.setCurrentIndex(render_tab)
+	window.show()
+	application.processEvents()
+	for _ in range(2):
+		window.workspace_tabs.setCurrentIndex(render_tab)
+		application.processEvents()
+		window._analysis_succeeded(output)
+		window.workspace_tabs.setCurrentIndex(1)
+		application.processEvents()
+		canvas = window.figure_canvas
+		pixel_width, pixel_height = canvas.figure.get_size_inches() * canvas.figure.dpi
+		assert pixel_width == pytest.approx(canvas.width() * canvas.device_pixel_ratio, abs=1)
+		assert pixel_height == pytest.approx(canvas.height() * canvas.device_pixel_ratio, abs=1)
+	window.resize(1600, 1100)
+	application.processEvents()
+	canvas = window.figure_canvas
+	assert canvas.figure.bbox.width == pytest.approx(canvas.width() * canvas.device_pixel_ratio, abs=1)
+	assert canvas.figure.bbox.height == pytest.approx(canvas.height() * canvas.device_pixel_ratio, abs=1)
+	window.close()
+	application.processEvents()
+
+
+def test_variable_columns_are_adjustable_and_keep_scaling() -> None:
+	application = QApplication.instance() or QApplication([])
+	window = MainWindow()
+	window.resize(1920, 1200)
+	window.show()
+	application.processEvents()
+	table = window.variable_list
+	header = table.horizontalHeader()
+	assert all(header.sectionResizeMode(index) == QHeaderView.Interactive for index in range(4))
+	width = table.columnWidth(2) + 60
+	header.resizeSection(2, width)
+	application.processEvents()
+	assert table.columnWidth(2) == width
+	window.resize(2560, 1440)
+	application.processEvents()
+	assert table.columnWidth(2) > width
+	assert sum(table.columnWidth(index) for index in range(4)) == pytest.approx(table.viewport().width(), abs=2)
+	assert table.columnWidth(2) > table.columnWidth(1)
+	window.close()
+	application.processEvents()
+
+
+@pytest.mark.parametrize("column", range(4))
+def test_column_drag_cannot_push_other_columns_offscreen(column: int) -> None:
+	application = QApplication.instance() or QApplication([])
+	window = MainWindow()
+	window.variable_list.setRowCount(60)
+	window.show()
+	application.processEvents()
+	table = window.variable_list
+	header = table.horizontalHeader()
+	minimum = header.minimumSectionSize()
+	for window_width in (1920, 1100, 2560, 900):
+		window.resize(window_width, 1000)
+		application.processEvents()
+		for requested_width in (table.viewport().width() * 3, minimum):
+			header.resizeSection(column, requested_width)
+			application.processEvents()
+			assert all(table.columnWidth(index) >= minimum for index in range(4))
+			assert header.length() == pytest.approx(table.viewport().width(), abs=1)
+			assert header.sectionViewportPosition(3) + table.columnWidth(3) <= table.viewport().width() + 1
+			assert table.horizontalScrollBar().maximum() == 0
+	window.close()
+	application.processEvents()
+
+
+def test_reconfirm_after_column_resize_preserves_loaded_analysis(monkeypatch, tmp_path: Path) -> None:
+	application = QApplication.instance() or QApplication([])
+	window = MainWindow()
+	variables = (SweepVariable("front", "bar", (1.,)), SweepVariable("rear", "bar", (2.,)))
+	discovery = DiscoveryResult(tmp_path, tmp_path, tmp_path, None, variables, None, ())
+	window._discovery_succeeded(discovery)
+	config = AnalysisConfig(
+		dataset=DatasetConfig(tmp_path, tmp_path, track_name="CTMP", confirmed_header_track="CTMP"),
+		sweep_variables=[SweepVariableConfig("front", role="y"), SweepVariableConfig("rear", role="x")],
+	)
+	window.session.config = config
+	window.variable_list.cellWidget(0, 1).setCurrentText("y")
+	window.variable_list.cellWidget(1, 1).setCurrentText("x")
+	run = DXPXRun(tmp_path / "0" / "run.dxpx", {"TrackName": "CTMP"}, {
+		"sLap": np.array([0., 1.]), "grip": np.array([1., 2.]),
+		"isApex": np.array([1, 0]), "isTurnZone1": np.array([1, 1]),
+	})
+	loaded = LoadedDataset((run,), {"grip": source_metric("grip", "Grip", "grip", "g")}, ())
+	window._loading_succeeded(loaded)
+	window.metric_combo.setCurrentIndex(window.metric_combo.findData("grip"))
+	window.plot_combo.setCurrentIndex(window.plot_combo.findData("heatmap"))
+	window.phase_list.item(0).setCheckState(Qt.CheckState.Checked)
+	window.zone_list.item(0).setCheckState(Qt.CheckState.Checked)
+	window._begin_analysis()
+	_wait_for_window_worker(window, application)
+	assert window.session.state is SessionState.RESULTS_AVAILABLE
+	dataset = window.session.config.dataset
+	previous_result = window.session.result
+	window.variable_list.horizontalHeader().resizeSection(2, 250)
+	def unexpected_reload(*args):
+		pytest.fail("Reconfirming unchanged sources must not reload the data")
+	monkeypatch.setattr(window, "_start_loading", unexpected_reload)
+	window.confirm_button.click()
+	assert window.session.state is SessionState.READY
+	assert window.session.loaded_dataset is loaded
+	assert window.session.config.dataset is dataset
+	assert window.session.config.dataset.confirmed_header_track == "CTMP"
+	assert window.session.result is previous_result
+	assert window._checked_names(window.phase_list) == ("isApex",)
+	assert window._checked_names(window.zone_list) == ("isTurnZone1",)
+	window._begin_analysis()
+	_wait_for_window_worker(window, application)
+	assert window.session.state is SessionState.RESULTS_AVAILABLE
+	assert window.session.result.plot_data.values.shape == (1, 1)
+	window.close()
+	application.processEvents()
+
+
+def test_file_menu_has_room_for_labels_and_shortcuts(tmp_path: Path) -> None:
+	application = QApplication.instance() or QApplication([])
+	window = MainWindow()
+	window.show()
+	menu = window.file_menu
+	font_path = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts/segoeui.ttf"
+	if font_path.is_file():
+		font_id = QFontDatabase.addApplicationFont(str(font_path))
+		families = QFontDatabase.applicationFontFamilies(font_id)
+		if families:
+			menu.setFont(QFont(families[0], 10))
+	menu.popup(window.mapToGlobal(QPoint(10, 30)))
+	application.processEvents()
+	metrics = menu.fontMetrics()
+	for action in (window.open_action, window.save_action, window.save_as_action):
+		label_width = metrics.horizontalAdvance(action.text())
+		shortcut_width = metrics.horizontalAdvance(action.shortcut().toString())
+		assert menu.actionGeometry(action).width() >= label_width + shortcut_width + 24
+	assert menu.grab().save(str(tmp_path / "file-menu.png"))
+	menu.close()
+	window.close()
 	application.processEvents()
 
 
@@ -117,6 +279,7 @@ def test_save_and_open_unapplied_draft(monkeypatch, tmp_path: Path) -> None:
 	window._external_baseline_path = tmp_path / "inactive.dxpx"
 	window.baseline_combo.setCurrentIndex(window.baseline_combo.findData("none"))
 	window.annotate_checkbox.setChecked(False)
+	window.export_aspect.setCurrentIndex(window.export_aspect.findData("16:9"))
 	window.export_svg.setChecked(False)
 	assert window._save_analysis()
 	saved = AnalysisConfig.load(path)
@@ -128,6 +291,7 @@ def test_save_and_open_unapplied_draft(monkeypatch, tmp_path: Path) -> None:
 	assert saved.plot.plot_type == "suggested"
 	assert not saved.plot.annotate
 	assert saved.export.formats == ("png",)
+	assert saved.export.aspect_ratio == "16:9"
 	window.analysis_name.setText("Unsaved edit")
 	monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
 	window._open_analysis()
@@ -269,7 +433,10 @@ def test_open_reloads_override_and_restores_track_safely(monkeypatch, tmp_path: 
 		assert window.session.result is not None
 		assert window.figure_canvas.figure.axes[0].get_xlabel() == "Pressure [bar]"
 		window.export_directory.setText(str(tmp_path / "exports"))
+		window.export_aspect.setCurrentIndex(window.export_aspect.findData("4:3"))
+		original_size = tuple(window.figure_canvas.figure.get_size_inches())
 		window._export_figure()
+		assert tuple(window.figure_canvas.figure.get_size_inches()) == original_size
 		assert (tmp_path / "exports/study.svg").is_file()
 		assert (tmp_path / "exports/study.png").is_file()
 	window.close()

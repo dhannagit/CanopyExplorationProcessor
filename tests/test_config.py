@@ -68,7 +68,7 @@ def test_full_recipe_round_trip_preserves_inactive_choices(tmp_path: Path) -> No
 			lap_indices=(0, 3), delta_mode="percent"),
 		filters=FilterConfig(("isApex",), ("isTurnZone1",), "and", "or", "or"),
 		plot=PlotConfig("suggested", False),
-		export=ExportConfig(tmp_path / "figures", ("svg",)),
+		export=ExportConfig(tmp_path / "figures", ("svg",), "4:3"),
 	)
 	path = tmp_path / "recipe.json"
 	config.save(path)
@@ -91,6 +91,7 @@ def test_atomic_save_failure_preserves_previous_file(monkeypatch, tmp_path: Path
 @pytest.mark.parametrize("update", [
 	{"schema_version": 1}, {"metric": ["grip"]}, {"plot": {"annotate": "false"}},
 	{"filters": {"phases": "isApex"}}, {"baseline": {"lap_indices": [True]}},
+	{"export": {"aspect_ratio": "invalid"}},
 ])
 def test_malformed_recipe_is_rejected(update: dict) -> None:
 	values = AnalysisConfig().to_dict()

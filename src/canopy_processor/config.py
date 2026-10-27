@@ -16,6 +16,8 @@ DELTA_MODES = {"none", "absolute", "percent"}
 AXIS_ROLES = {"x", "y", "facet", "color", "unused"}
 MASK_OPERATORS = {"and", "or"}
 EXPORT_FORMATS = {"svg", "png"}
+EXPORT_ASPECT_RATIOS = {"window": None, "1:1": 1.0, "5:4": 5 / 4, "4:3": 4 / 3,
+	"3:2": 3 / 2, "16:10": 16 / 10, "16:9": 16 / 9}
 
 
 @dataclass
@@ -131,11 +133,14 @@ class ExportConfig:
 
 	output_directory: Path | None = None
 	formats: tuple[str, ...] = ("svg", "png")
+	aspect_ratio: str = "window"
 
 	def __post_init__(self) -> None:
 		unknown_formats = set(self.formats) - EXPORT_FORMATS
 		if unknown_formats:
 			raise ValueError(f"Unknown export formats: {sorted(unknown_formats)}")
+		if self.aspect_ratio not in EXPORT_ASPECT_RATIOS:
+			raise ValueError(f"Unknown export aspect ratio: {self.aspect_ratio}")
 
 
 @dataclass

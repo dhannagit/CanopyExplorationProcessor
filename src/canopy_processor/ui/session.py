@@ -70,7 +70,10 @@ class AnalysisSession:
 	def mark_ready(self) -> None:
 		"""Mark the reviewed configuration as ready to analyze."""
 
-		if self.state not in {SessionState.REVIEW_REQUIRED, SessionState.READY}:
+		allowed = {SessionState.REVIEW_REQUIRED, SessionState.READY, SessionState.RESULTS_AVAILABLE}
+		if self.state is SessionState.FAILED and self.discovery_result is not None:
+			allowed.add(SessionState.FAILED)
+		if self.state not in allowed:
 			raise RuntimeError("A discovered configuration must be reviewed first")
 		self.state = SessionState.READY
 		self.last_error = None

@@ -467,6 +467,44 @@ has been published and no production installation was modified.
 
 **Next:** Manually verify the corrected selection workflow with the user's pressure-analysis recipe.
 
+## 2026-10-27 - Correct menu, table, and plot sizing
+
+**Goal:** Separate File-menu shortcuts from labels, allow manual sweep-column sizing without losing responsive scaling, and resolve plots intermittently drawing small in the top-left corner.
+
+**Root cause:** Rendering attached a new default-size Matplotlib figure to an existing Qt canvas without reinitializing the canvas sizing/DPI lifecycle. A regression test reproduced a 640-pixel figure inside a 1,350-pixel-wide widget without a subsequent resize event.
+
+**Changed:** Added explicit menu-item spacing and retained the File menu on the window. All four sweep-variable columns now support manual resizing while their proportions scale with the viewport. Each rendered figure receives its own Qt canvas, replacing the prior canvas through the layout so visible/hidden tab transitions and window resizing synchronize figure dimensions.
+
+**Evidence:** Full suite passes with 102 tests. Focused geometry tests also pass at 150% scaling. Tests cover repeated rendering without resizing, rendering while Results is hidden, subsequent window resizing, interactive table columns, and shortcut text widths. A readable offscreen menu capture was inspected for overlap; temporary captures and test directories were removed afterward.
+
+**Follow-up:** Manual column resizing is now constrained to the table viewport. Growing a column shrinks neighboring columns to their minimum widths, then clamps further growth so no column moves beyond the right edge. Shrinking a column gives the released width to a neighbor, and automatic scaling retains the adjusted proportions. Tests drag every column beyond the viewport and back to its minimum at window widths of 900, 1100, 1920, and 2560 pixels, checking that the rightmost edge remains visible and no horizontal scrollbar appears. Full suite now passes with 114 tests.
+
+**Next:** Add independent export size/aspect controls. Current export uses the displayed figure's dimensions at 300 DPI with tight cropping; exact export ratios will need a separate sizing policy rather than changing the interactive canvas dimensions.
+
+## 2026-10-27 - Allow variable reconfirmation after analysis
+
+**Goal:** Fix the exception raised when confirming sweep variables again after resizing columns and producing results.
+
+**Root cause:** `mark_ready()` accepted only initial review/ready states, while the Confirm button could be used from a completed analysis. Reconfirmation also rebuilt the dataset settings and reloaded unchanged files, unnecessarily clearing filter selections and circuit confirmation.
+
+**Changed:** Permit reconfirmation from results and from a failed operation with an existing discovery, while retaining guards for uninitialized/busy states. Reuse an unchanged loaded dataset when reconfirming variables, preserving checked masks, metric selection, and circuit confirmation.
+
+**Evidence:** The regression test analyzes, resizes the Display name column, clicks Confirm variables, and analyzes again. It verifies no source reload, no exception, preserved masks/confirmation, and a valid heatmap. Full suite passes with 110 tests.
+
+**Next:** Manually verify repeated configuration edits in reopened analyses.
+
+## 2026-10-27 - Select figure export aspect ratios
+
+**Goal:** Choose common image proportions while keeping export dimensions relative to the current plot/window size.
+
+**Changed:** Added a Results export dropdown between the folder chooser and SVG/PNG checkboxes. Presets are Window, 1:1, 5:4, 4:3, 3:2, 16:10, and 16:9. The selected aspect is saved and restored with analysis recipes.
+
+**Decisions:** Window preserves the existing tight-cropped export. Fixed ratios use an independent figure copy sized to the largest rectangle of the requested ratio within the displayed figure's dimensions. Recalculate layout and export the complete canvas at 300 DPI without tight cropping, which would otherwise alter the final image ratio. The interactive figure/canvas remains unchanged.
+
+**Evidence:** Full suite passes with 122 tests. Tests check PNG pixel dimensions and SVG view boxes for all six fixed presets, proportional output growth with displayed-figure size, unchanged original figure dimensions/axes/canvas, recipe round trips, and dropdown placement. Temporary image outputs and test directories were removed after validation.
+
+**Next:** Manually review the available export presets with representative heatmaps and faceted plots.
+
 ## Logging Checklist
 
 

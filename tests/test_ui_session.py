@@ -1,3 +1,5 @@
+import pytest
+
 from canopy_processor.ui import AnalysisSession, SessionState
 
 
@@ -39,3 +41,23 @@ def test_discovery_cancellation_returns_to_empty() -> None:
 	session.complete_cancellation()
 
 	assert session.state is SessionState.EMPTY
+
+
+@pytest.mark.parametrize("state", [SessionState.RESULTS_AVAILABLE, SessionState.FAILED])
+def test_variables_can_be_reconfirmed_in_idle_session(state: SessionState) -> None:
+	session = AnalysisSession(state=state, discovery_result="study", result="last result", last_error="old error")
+	session.mark_ready()
+	assert session.state is SessionState.READY
+	assert session.result == "last result"
+	assert session.last_error is None
+
+
+@pytest.mark.parametrize("state", [
+	SessionState.EMPTY, SessionState.DISCOVERING, SessionState.LOADING,
+	SessionState.ANALYZING, SessionState.CANCELLING,
+])
+def test_reconfirmation_rejects_uninitialized_or_busy_session(state: SessionState) -> None:
+	session = AnalysisSession(state=state)
+	with pytest.raises(RuntimeError, match="reviewed first"):
+		session.mark_ready()
+	assert session.state is state

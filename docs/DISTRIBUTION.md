@@ -165,6 +165,7 @@ after uploading the final assets without repeating verification.
 On success, the script prints the upload directory. Inspect it:
 
 ```powershell
+$assets = Join-Path $PWD "dist\github-release\v$version"
 Get-ChildItem -LiteralPath $assets
 ```
 

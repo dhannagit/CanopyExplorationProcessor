@@ -14,3 +14,5 @@ dist/
 *.egg-info/
 /canopy_exploration_processor-*/
 *.json
+/PythonAppGitLabTemplate
+*.zip

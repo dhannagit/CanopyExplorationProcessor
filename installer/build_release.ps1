@@ -37,11 +37,11 @@ try {
     $buildOutput = Join-Path $staging 'packages'
     $buildSource = Join-Path $staging 'source'
     New-Item -ItemType Directory -Force -Path (Join-Path $buildSource 'src') | Out-Null
-    foreach ($file in @('pyproject.toml', 'MANIFEST.in', 'README.md')) {
+    foreach ($file in @('pyproject.toml', 'MANIFEST.in', 'README.md', 'uv.lock', '.gitlab-ci.yml')) {
         Copy-Item -LiteralPath (Join-Path $root $file) -Destination $buildSource
     }
     Copy-Item -LiteralPath (Join-Path $root 'src\canopy_processor') -Destination (Join-Path $buildSource 'src') -Recurse
-    foreach ($directory in @('docs', 'installer', 'tests')) {
+    foreach ($directory in @('docs', 'installer', 'tests', 'ci')) {
         New-Item -ItemType Directory -Path (Join-Path $buildSource $directory) | Out-Null
     }
     foreach ($file in @('DISTRIBUTION.md', 'DECISIONS.md', 'BUILD_LOG.md')) {
@@ -49,6 +49,7 @@ try {
     }
     Get-ChildItem -LiteralPath $PSScriptRoot -File | Where-Object Extension -In '.ps1', '.bat', '.iss' |
         Copy-Item -Destination (Join-Path $buildSource 'installer')
+    Copy-Item -Path (Join-Path $root 'ci\*.ps1') -Destination (Join-Path $buildSource 'ci')
     Get-ChildItem -Path (Join-Path $root 'tests\test_*.py') -File |
         Copy-Item -Destination (Join-Path $buildSource 'tests')
     & $uv build $buildSource --index-url $IndexUrl --out-dir $buildOutput
@@ -68,7 +69,7 @@ try {
     }
     $manifestPath = Join-Path $buildOutput "release-$version.json"
     $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding UTF8
-    $assets = Join-Path $root "dist\github-release\v$version"
+    $assets = Join-Path $root "dist\releases\v$version"
     if (Test-Path -LiteralPath $assets) { Remove-Item -LiteralPath $assets -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $assets | Out-Null
     $bundleName = "CanopyExplorationProcessor-$version-Windows-x64"
@@ -101,7 +102,7 @@ try {
         (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $_.Name
     }
     $checksums | Set-Content -LiteralPath (Join-Path $assets 'SHA256SUMS.txt') -Encoding ASCII
-    Write-Output "GitHub Release assets ready in $assets. Test before uploading; nothing has been published."
+    Write-Output "Release artifacts ready in $assets. Test before distributing; nothing has been published."
 } finally {
     if ($staging -and (Test-Path -LiteralPath $staging)) { Remove-Item -LiteralPath $staging -Recurse -Force }
     Pop-Location

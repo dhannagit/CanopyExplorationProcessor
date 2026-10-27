@@ -3,7 +3,7 @@
 #endif
 
 #ifndef MyPayloadDir
-  #error "Build with installer\build_release.ps1 -CompileInstaller to provide the GitHub release payload."
+  #error "Build with installer\build_release.ps1 -CompileInstaller to provide the release payload."
 #endif
 
 [Setup]
@@ -15,7 +15,7 @@ DefaultGroupName=Canopy Exploration Processor
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-OutputDir=..\dist\github-release\v{#MyAppVersion}
+OutputDir=..\dist\releases\v{#MyAppVersion}
 OutputBaseFilename=CanopyExplorationProcessor-{#MyAppVersion}-Setup
 Compression=lzma2
 SolidCompression=yes

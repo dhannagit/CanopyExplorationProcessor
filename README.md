@@ -4,7 +4,8 @@ Windows workbench for analyzing Canopy simulation sweeps.
 
 ## Install
 
-Download the Windows setup ZIP or EXE from this repository's **Releases** page.
+Download the Windows setup ZIP or EXE from a successful GitLab **package_windows**
+job's artifacts. Ask the maintainer for the approved pipeline/job link.
 Corporate Windows x64 devices need approved `uv` tooling, Python 3.13 and network
 access to corporate Artifactory during setup. The app wheel is bundled with the
 release; third-party dependencies come from Artifactory. No company updater or
@@ -15,10 +16,10 @@ For ZIP, extract into a stable writable folder, run `setup_environment.bat`, the
 Open **File > Settings** to select the synced folder containing the circuit workbook.
 This is optional for basic analysis: leave it unconfigured if you are not preparing
 turn-zone filters.
-Updates are manual: download and install a newer GitHub Release.
+Updates are manual: download and install a newer approved job artifact.
 
-See the [GitHub Release Guide](docs/DISTRIBUTION.md) for prerequisites, building,
-GitHub publishing, validation, signing considerations, upgrades and rollback.
+See the [GitLab Artifact Guide](docs/DISTRIBUTION.md) for prerequisites, local
+builds, CI setup, artifact downloads, signing considerations, upgrades and rollback.
 
 ## Basic Use: No Filters Or Circuit Workbook
 
@@ -74,7 +75,7 @@ samples; they do not recalculate scalar metrics such as a precomputed lap time.
 
 Preparing turn-zone filters currently depends on the circuit workbook
 `CircuitsData_Canopy_Hypercar.xlsx`, which you can **request from the repository
-maintainer**. It is not included in the GitHub download. Runs that already contain
+maintainer**. It is not included in the installer download. Runs that already contain
 turn-zone masks can use those existing masks without generating them again.
 
 1. Place the workbook in a locally accessible folder, such as your synced

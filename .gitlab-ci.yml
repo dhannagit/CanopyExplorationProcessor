@@ -1,0 +1,66 @@
+stages:
+  - preflight
+  - test
+  - package
+
+variables:
+  CANOPY_CI_ENABLED: "false"
+  CANOPY_WINDOWS_RUNNER_TAG: "az-weu-wind"
+  CANOPY_COMPILE_INSTALLER: "false"
+  CANOPY_FULL_TESTS: "false"
+  UV_SYSTEM_CERTS: "1"
+  UV_PROJECT_ENVIRONMENT: "$CI_PROJECT_DIR/.ci-venv"
+  QT_QPA_PLATFORM: "offscreen"
+
+workflow:
+  rules:
+    - if: '$CANOPY_CI_ENABLED != "true"'
+      when: never
+    - if: '$CI_COMMIT_REF_PROTECTED != "true"'
+      when: never
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "push")'
+    - when: never
+
+default:
+  tags:
+    - "$CANOPY_WINDOWS_RUNNER_TAG"
+  timeout: 30 minutes
+
+runner_preflight:
+  stage: preflight
+  script:
+    - powershell.exe -NoProfile -NonInteractive -File .\ci\run.ps1 -Phase Preflight
+  artifacts:
+    expire_in: 30 days
+    paths:
+      - reports/ci-context.txt
+
+test_windows:
+  stage: test
+  needs:
+    - job: runner_preflight
+      artifacts: false
+  script:
+    - powershell.exe -NoProfile -NonInteractive -File .\ci\run.ps1 -Phase Test
+  artifacts:
+    when: always
+    expire_in: 30 days
+    reports:
+      junit: reports/junit.xml
+    paths:
+      - reports/junit.xml
+
+package_windows:
+  stage: package
+  needs:
+    - job: test_windows
+      artifacts: false
+  script:
+    - powershell.exe -NoProfile -NonInteractive -File .\ci\run.ps1 -Phase Package
+  artifacts:
+    name: "Canopy-$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
+    when: on_success
+    expire_in: 90 days
+    paths:
+      - dist/releases/

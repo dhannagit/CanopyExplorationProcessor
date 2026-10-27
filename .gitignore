@@ -1,5 +1,7 @@
 # .gitignore
 .venv/
+.ci-venv/
+reports/
 .pytest_cache/
 .ruff_cache/
 __pycache__/

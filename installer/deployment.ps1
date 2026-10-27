@@ -113,7 +113,7 @@ function Install-Release($CurrentState) {
     if ($uri.Scheme -ne 'https' -or $uri.UserInfo) { throw 'Use an HTTPS repository URL without embedded credentials' }
     if (Test-RunningSession) { throw 'Close Canopy sessions before setup' }
     $manifestPath = Join-Path $PayloadDirectory 'release.json'
-    if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'Release payload is missing release.json; download the complete GitHub Release installer or ZIP' }
+    if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'Release payload is missing release.json; download the complete installer or ZIP job artifact' }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     $version = $manifest.version
     if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Only stable major.minor.patch releases are supported' }
@@ -153,7 +153,7 @@ function Install-Release($CurrentState) {
         if ($CurrentState) { $previous = $CurrentState.current }
         Write-State ([ordered]@{current = $name; previous = $previous; version = $version})
         $activated = $true
-        Write-Log "Activated bundled GitHub release $version"
+        Write-Log "Activated bundled release $version"
     } finally {
         if (-not $activated -and (Test-Path -LiteralPath $candidate)) {
             Remove-Item -LiteralPath $candidate -Recurse -Force

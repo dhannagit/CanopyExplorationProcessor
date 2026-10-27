@@ -1,0 +1,137 @@
+param(
+    [ValidateSet('Preflight', 'Test', 'Package')]
+    [string]$Phase = 'Preflight'
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+function Test-ReleaseVersion([string]$Version, [string]$Tag) {
+    if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Use a stable major.minor.patch project version' }
+    if ($Tag -and $Tag -ne "v$Version") { throw 'CI tag must match the version in pyproject.toml' }
+}
+
+function Get-TestArguments([bool]$FullSuite) {
+    if ($FullSuite) { return @('-m', 'pytest') }
+    return @(
+        '-m', 'pytest', 'tests/test_ci.py', 'tests/test_installer.py', 'tests/test_ui_settings.py',
+        'tests/test_ui_discovery.py', 'tests/test_ui_main_window.py', 'tests/test_config.py',
+        'tests/test_exporting.py', 'tests/test_plot_data.py', 'tests/test_plotting.py',
+        'tests/test_ui_session.py', 'tests/test_ui_worker.py', '-k',
+        'not sample_sources and not track_temperature and not populates_discovered and not persists_multiple and not manual_dxpx'
+    )
+}
+
+function Get-CiUv {
+    $command = Get-Command uv.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    foreach ($directory in @('C:\Bib\Prod\Miniforge3', 'C:\Bib\Prod\Miniconda3-64')) {
+        foreach ($relative in @('Library\bin\uv.exe', 'Scripts\uv.exe')) {
+            $candidate = Join-Path $directory $relative
+            if (Test-Path -LiteralPath $candidate) { return $candidate }
+        }
+    }
+    throw 'Provision approved uv tooling for the Windows runner service account'
+}
+
+function Test-ArtifactChecksums([string]$Directory) {
+    $checksumFile = Join-Path $Directory 'SHA256SUMS.txt'
+    if (-not (Test-Path -LiteralPath $checksumFile)) { throw 'Release checksums are missing' }
+    $lines = @(Get-Content -LiteralPath $checksumFile | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($lines.Count -eq 0) { throw 'Release checksum list is incomplete' }
+    $names = @()
+    foreach ($line in $lines) {
+        if ($line -notmatch '^([a-f0-9]{64})  ([^\\/]+)$') { throw 'Invalid release checksum entry' }
+        $digest = $Matches[1]
+        $name = $Matches[2]
+        if ($name -eq '.' -or $name -eq '..') { throw 'Invalid release asset name' }
+        if ($names -contains $name) { throw 'Duplicate release checksum entry' }
+        $names += $name
+        $actual = (Get-FileHash -LiteralPath (Join-Path $Directory $name) -Algorithm SHA256).Hash
+        if ($actual -ne $digest) { throw "Release checksum mismatch: $name" }
+    }
+    $actualNames = @(Get-ChildItem -LiteralPath $Directory -File | Where-Object Name -ne 'SHA256SUMS.txt' | ForEach-Object Name)
+    if (Compare-Object $names $actualNames) { throw 'Release checksum list is incomplete' }
+}
+
+function Test-InstalledBundle([string]$Archive, [string]$Version) {
+    $temporary = Join-Path ([IO.Path]::GetTempPath()) ('canopy-ci-smoke-' + [guid]::NewGuid().ToString('N'))
+    $oldLocalAppData = $env:LOCALAPPDATA
+    $oldFindLinks = $env:UV_FIND_LINKS
+    try {
+        $env:LOCALAPPDATA = Join-Path $temporary 'user'
+        $env:UV_FIND_LINKS = $null
+        Expand-Archive -LiteralPath $Archive -DestinationPath $temporary
+        $bundle = Join-Path $temporary "CanopyExplorationProcessor-$Version-Windows-x64"
+        & (Join-Path $bundle 'deployment.ps1') -Mode Setup
+        if ($LASTEXITCODE -ne 0) { throw 'Installed-bundle dependency/Qt smoke check failed' }
+        if (-not (Test-Path -LiteralPath (Join-Path $bundle 'active.json'))) { throw 'Smoke installation was not activated' }
+        & (Join-Path $bundle 'deployment.ps1') -Mode Remove
+        if ($LASTEXITCODE -ne 0) { throw 'Smoke installation removal failed' }
+    } finally {
+        $env:LOCALAPPDATA = $oldLocalAppData
+        $env:UV_FIND_LINKS = $oldFindLinks
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force }
+    }
+}
+
+if ($MyInvocation.InvocationName -eq '.') { return }
+
+$root = Split-Path $PSScriptRoot -Parent
+Push-Location $root
+try {
+    if ($env:OS -ne 'Windows_NT' -or -not [Environment]::Is64BitProcess) { throw 'CI requires a Windows x64 PowerShell runner' }
+    if ($env:UV_INSECURE_HOST) { throw 'CI must use approved certificate trust, not UV_INSECURE_HOST' }
+    $env:UV_SYSTEM_CERTS = '1'
+    $uv = Get-CiUv
+    $pythonOutput = & $uv python find --offline 3.13
+    if ($LASTEXITCODE -ne 0) { throw 'Provision approved Python 3.13 for the runner before enabling CI' }
+    $python = ($pythonOutput | Out-String).Trim()
+    $version = (& $python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])").Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read the project version' }
+    Test-ReleaseVersion $version $env:CI_COMMIT_TAG
+    $compileInstaller = $env:CANOPY_COMPILE_INSTALLER -eq 'true'
+    if ($compileInstaller) {
+        $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+        $compilerFound = [bool]$compiler
+        foreach ($directory in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
+            if (Test-Path -LiteralPath (Join-Path $directory 'Inno Setup 6\ISCC.exe')) { $compilerFound = $true }
+        }
+        if (-not $compilerFound) { throw 'Provision approved Inno Setup 6 or disable CANOPY_COMPILE_INSTALLER' }
+    }
+    New-Item -ItemType Directory -Force -Path reports | Out-Null
+    switch ($Phase) {
+        'Preflight' {
+            @(
+                "version=$version", "commit=$env:CI_COMMIT_SHA", "phase=$Phase",
+                "compile_installer=$compileInstaller", "full_tests=$($env:CANOPY_FULL_TESTS -eq 'true')"
+            ) | Set-Content -LiteralPath reports/ci-context.txt -Encoding UTF8
+            Write-Output 'Windows, uv, Python, tag/version and optional compiler preflight passed. Corporate index access is checked during dependency installation.'
+        }
+        'Test' {
+            $env:QT_QPA_PLATFORM = 'offscreen'
+            if (-not $env:UV_PROJECT_ENVIRONMENT) { $env:UV_PROJECT_ENVIRONMENT = Join-Path $root '.ci-venv' }
+            & $uv sync --locked --extra gui --extra test --group dev --python $python
+            if ($LASTEXITCODE -ne 0) { throw 'Locked CI dependency installation failed; check approved index authentication and certificates' }
+            $testPython = Join-Path $env:UV_PROJECT_ENVIRONMENT 'Scripts\python.exe'
+            $fullSuite = $env:CANOPY_FULL_TESTS -eq 'true'
+            if (-not $fullSuite) { Write-Warning 'Running fixture-independent tests only; full dataset/numerical parity is not validated by this job' }
+            $arguments = @(Get-TestArguments $fullSuite) + @(
+                '-q', '--junitxml=reports/junit.xml', '--basetemp',
+                (Join-Path ([IO.Path]::GetTempPath()) ('canopy-ci-pytest-' + [guid]::NewGuid().ToString('N')))
+            )
+            & $testPython @arguments
+            if ($LASTEXITCODE -ne 0) { throw 'CI test suite failed' }
+        }
+        'Package' {
+            & (Join-Path $root 'installer\build_release.ps1') -CompileInstaller:$compileInstaller
+            if ($LASTEXITCODE -ne 0) { throw 'CI release build failed' }
+            $assets = Join-Path $root "dist\releases\v$version"
+            Test-ArtifactChecksums $assets
+            Test-InstalledBundle (Join-Path $assets "CanopyExplorationProcessor-$version-Windows-x64.zip") $version
+            Write-Output "Verified release artifacts: $assets"
+        }
+    }
+} finally {
+    Pop-Location
+}

@@ -85,7 +85,7 @@ pre-production format without a migration layer.
 
 ## ADR-008 - Deliver standalone applications through GitHub Releases
 
-**Status:** Accepted
+**Status:** Superseded by ADR-009 for delivery hosting and CI.
 
 **Decision:** Publish the application as versioned GitHub Release assets: a Windows
 setup ZIP, an optional Inno EXE, the normal Python wheel/source archive, a manifest
@@ -100,6 +100,30 @@ updater integration. Keeping a normal wheel and existing package boundaries leav
 future host-tool/module integration open without imposing a plugin framework now.
 Build on corporate Windows with Artifactory access, then upload final app artifacts;
 do not assume public GitHub runners can reach internal dependency repositories.
+
+## ADR-009 - Build standalone installers as GitLab job artifacts
+
+**Status:** Accepted for artifact-only integration; company toolchain approval pending.
+
+**Decision:** Add an opt-in protected-ref Windows pipeline with preflight, locked
+tests/JUnit reporting, and packaging followed by production-lock installation/Qt
+smoke validation. Store final artifacts under `dist/releases/v<version>` and upload
+only that directory to the package job. No Generic Package Registry, application
+updater or unverified shared-CI include is enabled. Keep the existing app layout,
+wheel/private-environment deployment and optional Inno build until company tooling
+selects an approved alternative. CI and EXE compilation start disabled.
+
+Use the corporate template's Artifactory uv index/dev-group conventions, but keep
+the actual project's development `uv.lock` distinct from its embedded production
+dependency lock. Do not copy template OAuth, embedded secrets, sample application,
+stale lockfile, project IDs or generated version handling. Full tests require
+explicitly provisioned approved datasets; the default suite reports its limited scope.
+
+**Reason:** The supplied template and CI checkout name different shared workflow
+repositories, and the runner/compiler contract remains unconfirmed. A local,
+reviewable pipeline prepares integration without guessing publisher overrides or
+changing a tested deployment architecture. Artifact retention, access, signing,
+shared-workflow policy and compiler licensing remain company configuration gates.
 
 ## Presentation Evidence To Capture
 

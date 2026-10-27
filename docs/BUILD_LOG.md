@@ -2,6 +2,30 @@
 
 This is the chronological engineering record for the Python migration. Keep entries concise and factual. Each entry should capture what changed, why it changed, how it was verified, and what comes next.
 
+## 2026-10-27 - GitLab artifact CI foundation
+
+**Goal:** Prepare corporate GitLab builds and job-artifact delivery without Generic
+Package Registry publication or an unapproved packaging-engine change.
+
+**Changed:** Added a disabled-by-default protected Windows pipeline, runner/tag
+preflight, locked test environment and JUnit output, package hash verification and
+fresh production-lock installation/Qt smoke checking. Added an actual-project
+development uv lock and corporate index. Renamed outputs to `dist/releases` and
+updated README/distribution steps for runner provisioning and artifact downloads.
+
+**Evidence:** Preflight passed locally. A fresh uv-synced test environment passed
+85 fixture-independent tests with five dataset-dependent cases deselected and
+generated JUnit output. Pipeline structure and CI helper checks cover opt-in/ref
+gates, version matching, test selection and damaged/incomplete checksum rejection.
+The full locked CI test mode then passed all 129 tests with local sample data.
+The package phase compiled the Inno EXE, verified artifact hashes and passed a
+fresh production-lock ZIP installation/Qt smoke check/removal outside the checkout.
+
+**Next:** Company runner, packaging choice, signing/retention policy and exact
+shared workflow still require confirmation. This implementation deliberately does
+not include unverified remote jobs. GitLab CI lint and actual service-account runs
+are still required; no remote, tag, upload or pipeline was created locally.
+
 ## 2026-10-27 - GitHub Release distribution
 
 **Goal:** Distribute standalone releases on GitHub while retaining corporate

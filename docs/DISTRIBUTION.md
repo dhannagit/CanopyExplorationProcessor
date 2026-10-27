@@ -1,9 +1,10 @@
-# GitHub Release Guide
+# GitLab Artifact Guide
 
 This guide explains how to turn the source code into downloads your teammates can
 install. It does not publish anything automatically.
 
-**Maintainers:** follow Prerequisites, Build A Release, then Publish On GitHub.
+**Maintainers:** follow Prerequisites, GitLab CI Setup, Build A Release, then
+Build And Share On GitLab.
 **Teammates installing the app:** skip to User Setup.
 
 Examples use version `0.1.0`. Replace that number with your actual release version.
@@ -13,13 +14,15 @@ them with real values.
 
 ## Deployment Model
 
-GitHub provides the app download. Corporate Artifactory provides its third-party
+GitLab CI job artifacts provide the app download. Corporate Artifactory provides its third-party
 Python packages during installation. There is no company updater, and the app
-does not check GitHub or Artifactory when it starts.
+does not check GitLab or Artifactory when it starts. Executables are not uploaded
+to the Generic Package Registry or a company application updater.
 
 | Term | What It Means Here |
 | --- | --- |
-| Release | A named version on GitHub, such as `v0.1.0`, with attached downloads. |
+| Release build | A tested source commit/tag, such as `v0.1.0`, and its successful GitLab pipeline. |
+| Job artifact | Files GitLab stores with a completed CI job, downloadable by authorized project users. Not a package registry. |
 | EXE | Setup program that installs the app, adds Start Menu shortcuts and registers an uninstaller. |
 | Windows ZIP | Alternative setup bundle: extract it and run its batch files. No shortcuts or uninstaller registration are added. |
 | Wheel (`.whl`) | The Python app package inside both setup options; also supplied separately for future tool integration. |
@@ -27,7 +30,7 @@ does not check GitHub or Artifactory when it starts.
 | Manifest (`.json`) | Version, platform and wheel/dependency-lock hashes used by setup. It is not an installer. |
 | Checksum | A file fingerprint used to detect damaged or changed downloads. |
 
-The EXE and ZIP are both **GitHub Release assets**, not separate distribution
+The EXE and ZIP are both **job artifacts**, not separate distribution
 systems. Both contain the exact app wheel. Neither contains Python or all its
 dependencies, so initial installation is not fully offline. The app itself does
 not need to be uploaded to Artifactory.
@@ -42,10 +45,13 @@ docs/                      Release instructions and engineering records
 pyproject.toml             App name, version and package requirements
 MANIFEST.in                Additional files included in the source archive
 README.md                  Short project and installation introduction
-dist/github-release/       Generated downloads, grouped by release version
+.gitlab-ci.yml             Opt-in Windows pipeline and artifact retention
+ci/run.ps1                 Runner preflight, tests and packaging validation
+uv.lock                    Locked development/CI environment
+dist/releases/             Generated downloads, grouped by release version
 ```
 
-Only `dist/github-release/v<version>/` is used for uploads. Temporary build files
+Only `dist/releases/v<version>/` is collected as package-job artifacts. Temporary build files
 are generated under `dist` and removed after the build. Do not commit generated
 archives, `.egg-info`, copied source trees, `.venv`, or installed environments.
 Local study data and workbooks are not part of the release.
@@ -57,8 +63,9 @@ Local study data and workbooks are not part of the release.
 1. Use a corporate Windows x64 PC with access to the repository and Artifactory.
 2. Have approved `uv` tooling and Python 3.13 installed. The build script finds
    `uv.exe` on PATH or in corporate Miniforge/Miniconda locations.
-3. Use the existing development `.venv` with the GUI and test dependencies for
-   automated tests. Recipients do not need this development environment.
+3. Use a development environment with GUI/test dependencies. CI creates a separate
+   `.ci-venv` using `uv sync --locked --extra gui --extra test --group dev`.
+   Recipients do not need the development environment.
 4. To include an EXE, install approved Inno Setup 6.3 or later within version 6.
    Confirm its licence covers the intended corporate use. A compiler reporting
    "Non-commercial use only" needs review by IT before corporate distribution.
@@ -66,8 +73,8 @@ Local study data and workbooks are not part of the release.
    generated uninstaller. Local scripts working unsigned is not proof that
    downloaded scripts will be allowed on teammates' PCs.
 
-Build inside the corporate network. Ordinary GitHub-hosted runners are not assumed
-to reach internal Artifactory. Self-hosted CI can be considered separately later.
+Build inside the corporate network on an approved Windows x64 PowerShell runner.
+The provided pipeline does not assume access from public/shared Linux runners.
 
 ### For Anyone Installing The App
 
@@ -87,6 +94,107 @@ to reach internal Artifactory. Self-hosted CI can be considered separately later
 The scripts accept Python 3.13 patch releases; validation has used 3.13.14. If IT
 requires an exact patch, coordinate changes to build/setup scripts and retest.
 The app does not change global Python or PATH settings.
+
+## GitLab CI Setup
+
+### Step A: Confirm The Company Toolchain
+
+The company template references `dxp/sk/shared-ci-workflows` at ref `1`, file
+`carbon/python-qt.yml`. The supplied `ci-cd` checkout is a different library,
+`dord/infra/central-ci-cd/ci-cd`. Its Windows jobs use tag `az-weu-wind`, but that
+does not prove a runner with that tag has this app's required tools.
+
+This project therefore starts with a self-contained, **disabled-by-default**
+pipeline. It does not import unverified publishing jobs, template OAuth code,
+secret-embedding hooks, or PyInstaller/NSIS defaults. The tested wheel/private-env
+deployment and optional Inno compiler remain unchanged. Company approval of the
+packaging route is still required; this integration does not decide that policy.
+If the shared workflow is mandated, obtain its expanded YAML and adapt the local
+jobs through supported overrides before enabling them.
+
+Ask the runner/tooling owner to confirm:
+
+1. The approved Windows runner tag and executor/shell. `az-weu-wind` is the current
+   default; override it if the approved runner uses another tag. No container image
+   is selected because the runner/image contract has not been confirmed. A Docker
+   executor requires a company-approved Windows image with the tools below.
+2. `uv` and Python 3.13 are available to the **runner service account**. Preflight
+   uses `uv python find --offline 3.13`; it does not download a runtime silently.
+3. Corporate Artifactory authentication, proxy and CA trust work for that account,
+   including the registry dependencies and build backend. Keep secrets in approved
+   service/CI configuration, not the repository or index URL. Index URLs are recorded
+   in release metadata and must not contain credentials.
+4. If EXE builds are approved, licensed Inno Setup 6 and any required signing
+   service are available. The first run can build ZIP-only artifacts instead.
+5. Executable job artifacts, their project access permissions and retention are
+   approved. No executable Generic Package Registry publishing is configured.
+
+### Step B: Create The GitLab Project
+
+Create the approved corporate project/namespace and push/import the source history.
+Never include a personal access token in source or pipeline scripts. The token
+used to import a repository is not required inside these jobs; GitLab supplies job
+credentials for checkout and artifact upload. Importing source does not configure
+runners, variables, protected refs or Sonar settings.
+
+Protect the default branch and intended release tags, for example `v*`. The pipeline
+refuses unprotected refs. Keep the company template ZIP/extracted copy as local
+reference only; they are ignored, not packaged into the app.
+
+### Step C: Set Project CI Variables
+
+Open **Settings > CI/CD > Variables** and configure these non-secret switches.
+Project-level values override the safe defaults in `.gitlab-ci.yml`.
+
+| Variable | Default | Action |
+| --- | --- | --- |
+| `CANOPY_CI_ENABLED` | `false` | Set to `true` only after runner, policy and CI configuration review. |
+| `CANOPY_WINDOWS_RUNNER_TAG` | `az-weu-wind` | Set to the confirmed approved Windows runner tag. |
+| `CANOPY_COMPILE_INSTALLER` | `false` | Set to `true` only for approved Inno EXE builds; otherwise build ZIP/package assets. |
+| `CANOPY_FULL_TESTS` | `false` | Set to `true` only after all approved sample datasets are available in the checkout. |
+
+Use protected variables/secrets where appropriate. This file intentionally does not
+copy template credentials or invoke a secret downloader. Recipient dependency access
+must also work independently of CI; no CI credentials are embedded in installers.
+
+### Step D: Validate And Run
+
+Use GitLab's CI editor/CI Lint to validate the configuration on your company instance.
+This YAML has been parsed/tested locally, not remotely linted or run on your GitLab.
+With CI enabled and a protected default branch, run a pipeline through
+**Build > Pipelines > New pipeline** (the exact label can vary). Subsequent pushes
+to that branch and protected `v<version>` tags also create pipelines.
+
+The jobs run in this order:
+
+1. `runner_preflight`: Windows/tool availability and tag/version checks. It does
+   not establish registry access; dependency installation checks that next.
+2. `test_windows`: install the committed development `uv.lock`, run tests offscreen,
+   and produce `reports/junit.xml`. By default this explicitly selects tests without
+   external datasets; it is not a full numerical parity gate. Full tests require
+   approved fixtures, not a copy committed to the repo or uploaded as artifacts.
+3. `package_windows`: build ZIP/package assets and optionally EXE, verify checksums,
+   install the ZIP in a temporary environment with its production dependency lock,
+   run the installed Qt/native-library smoke check and remove that test install.
+
+Only successful package jobs upload `dist/releases/`, with a name containing the
+ref and commit. JUnit reports are kept for 30 days; package artifacts for 90 days,
+subject to instance policy. Approve an appropriate retention period before release.
+Use GitLab's supported **Keep** action where permitted. A GitLab Release link to
+an artifact does not stop that artifact expiring or grant access to nonmembers.
+
+Local CI equivalents, from the repository root:
+
+```powershell
+.\ci\run.ps1 -Phase Preflight
+.\ci\run.ps1 -Phase Test
+.\ci\run.ps1 -Phase Package
+```
+
+These commands use the same environment switches; for example, set
+`$env:CANOPY_COMPILE_INSTALLER = 'true'` only when intentionally testing the EXE
+route. The existing embedded production dependency lock is distinct from the
+development `uv.lock`. Do not routinely refresh either during a release build.
 
 ## Build A Release
 
@@ -115,7 +223,7 @@ Set these variables for the commands below, matching the version in the file:
 
 ```powershell
 $version = '0.1.0'
-$assets = Join-Path $PWD "dist\github-release\v$version"
+$assets = Join-Path $PWD "dist\releases\v$version"
 ```
 
 ### Step 3: Run Automated Tests
@@ -165,7 +273,7 @@ after uploading the final assets without repeating verification.
 On success, the script prints the upload directory. Inspect it:
 
 ```powershell
-$assets = Join-Path $PWD "dist\github-release\v$version"
+$assets = Join-Path $PWD "dist\releases\v$version"
 Get-ChildItem -LiteralPath $assets
 ```
 
@@ -178,7 +286,7 @@ Get-ChildItem -LiteralPath $assets
 | `release-<version>.json` | Release metadata for verification/support. |
 | `SHA256SUMS.txt` | Expected hashes of all the other assets. |
 
-No Artifactory app upload, `UV_FIND_LINKS` setting, or GitHub token is needed to
+No Artifactory app upload, `UV_FIND_LINKS` setting, or personal GitLab token is needed to
 build or test these downloads. The wheel remains a normal Python package for
 future integration; no host-tool/plugin framework is implemented now.
 
@@ -216,7 +324,7 @@ Write-Output 'All release checksums match.'
 ```
 
 Checksums detect changed files; they do not prove publisher identity or replace
-trusted GitHub access and signing requirements.
+trusted GitLab access and signing requirements.
 
 ### Step 7: Test What A Teammate Will Install
 
@@ -257,7 +365,7 @@ must also be physically available locally. Reconnect after this test.
 Before a team release, repeat installation on a teammate's PC. Use the Release
 Acceptance Checklist below to record exactly what was tested.
 
-## Publish On GitHub
+## Build And Share On GitLab
 
 ### Step 8: Commit And Tag The Tested Source
 
@@ -266,29 +374,31 @@ changes, and push that commit. Do not commit local datasets, credentials, `.venv
 or generated release files. Confirm the repository visibility is appropriate for
 company code and that the assets match the source being tagged.
 
-A tag names the exact commit behind a release. After pushing the tested commit:
+A tag names the exact commit behind a release. Push the tested commit to your
+company project first. If it is a separate remote named `gitlab`, use that name
+instead of `origin`. Check existing tags before creating one; never force-move a
+published tag. After pushing the tested commit:
 
 ```powershell
-git tag "v$version"
+git tag -a "v$version" -m "Canopy Exploration Processor $version"
 git push origin "v$version"
 ```
 
 If the tag already exists, investigate rather than moving it. Use a new version
 and rebuild if the existing version was published.
 
-### Step 9: Create A Draft Release
+### Step 9: Download The Successful Job Artifacts
 
-1. Open the GitHub repository in your browser.
-2. Select **Releases**, then **Draft a new release**.
-3. Select the matching tag, for example `v0.1.0`.
-4. Give it a title such as **Canopy Exploration Processor 0.1.0**.
-5. Explain changes, prerequisites, known limitations and what was tested.
-6. Attach **every file** from `dist/github-release/v<version>/`.
-7. Save the draft and review its downloads before publishing.
+1. Open **Build > Pipelines** in the company GitLab project.
+2. Select the pipeline for the intended tag/commit and confirm all jobs succeeded.
+3. Open `package_windows`, then find **Job artifacts > Browse** or **Download**.
+4. Download the EXE or Windows setup ZIP and `SHA256SUMS.txt`. Downloading all job
+   artifacts gives an outer archive containing `dist/releases/v<version>/`.
+5. Verify hashes and perform the normal-user test before sharing the job URL.
 
-Tell teammates to download the Windows EXE or Windows setup ZIP. GitHub also adds
-automatic source-code archives; those are not the Windows setup bundle. Do not
-upload the whole working directory, corporate dependencies, workbooks or secrets.
+The job artifact is the distribution endpoint. Do not upload executables to the
+Generic Package Registry. GitLab's automatic repository source archive is not the
+Windows setup ZIP. Do not upload local datasets, credentials, workbooks, or `.venv`.
 
 Suggested installation note for the release description:
 
@@ -296,25 +406,23 @@ Suggested installation note for the release description:
 > corporate Artifactory during setup. Download the Setup EXE or Windows-x64 ZIP.
 > Configure the circuit folder in File > Settings. Upgrades are manual.
 
-Optional: with approved GitHub CLI access, create the same draft from PowerShell:
+Optionally create a GitLab Release for the tag and link directly to the approved
+retained job artifacts. This is only navigation; it does not store a second copy,
+extend retention, or justify uploading the EXE to a package registry. No Release
+creation/API call is built into this project.
 
-```powershell
-$assetPaths = Get-ChildItem -LiteralPath $assets -File | ForEach-Object FullName
-gh release create "v$version" @assetPaths --verify-tag --draft --title "Canopy Exploration Processor $version" --notes 'Windows x64; corporate uv, Python 3.13 and Artifactory access required. Download the Windows setup ZIP or EXE. Upgrades are manual.'
-```
+### Step 10: Share After Approval
 
-### Step 10: Publish After Approval
-
-Finish the checklist, confirm licensing/signing requirements and review the draft.
-Then select **Publish release** on GitHub. Share the release page, not your local
-build folder. The build scripts never commit, tag, upload or publish for you.
-No GitHub token is stored in the app.
+Finish the checklist, confirm licensing/signing requirements, artifact access and
+retention, then share the specific successful package-job URL or optional Release
+page. CI uploads job artifacts; it does not publish to any package registry. Local
+build scripts never commit, tag or upload. No GitLab token is stored in the app.
 
 ## User Setup
 
 These are the steps to give teammates who are not building the app:
 
-1. Open the GitHub Release page and download the Windows EXE or Windows-x64 ZIP,
+1. Open the approved GitLab package-job artifact link and download the EXE or Windows-x64 ZIP,
    plus `SHA256SUMS.txt`. Compare the download's `Get-FileHash -Algorithm SHA256`
    result with its line in that file.
 2. Connect to the corporate network so setup can retrieve Python dependencies.
@@ -342,7 +450,7 @@ study load. The app does not make an immutable copy of the external workbook.
 
 ### Upgrade To A New Release
 
-1. Close every Canopy window and download a newer GitHub Release.
+1. Close every Canopy window and download a newer approved GitLab job artifact.
 2. For EXE, run it against the same install folder. Existing user settings remain.
 3. For ZIP, the simplest approach is a new stable folder and fresh setup. Keep
    the old folder until the new version is accepted; settings are shared per user.
@@ -403,6 +511,10 @@ approved corporate tooling interactively if IT needs detailed repository errors.
 | Missing manifest/checksum mismatch | Download the complete release again. Do not edit the manifest to hide an error. |
 | Workbook unavailable offline | Confirm OneDrive has downloaded it and verify File > Settings. Network-drive data may also be unavailable. |
 | Test cleanup permission error | Use the unique `--basetemp` command in Step 3, not an older admin-created temp directory. |
+| No GitLab pipeline appears | Confirm `CANOPY_CI_ENABLED=true`, a protected ref, and a default-branch push/web pipeline or matching protected version tag. |
+| CI job stays pending | Confirm the runner tag, runner/project permission, protected-runner settings and Windows executor/image with IT. |
+| CI tests pass but full data scenarios are absent | Default jobs intentionally exclude external fixtures. Provision approved data and enable `CANOPY_FULL_TESTS`. |
+| Artifact download expired/denied | Check job retention/Keep policy and project membership. A Release link cannot bypass either. |
 
 ## Release Acceptance Checklist
 
@@ -410,6 +522,8 @@ Record results before publishing. Mark anything not tested explicitly; do not
 describe the release as fully validated when a required scenario is outstanding.
 
 - [ ] Correct version, matching source commit/tag, final assets and valid checksums.
+- [ ] GitLab CI lint/expanded configuration reviewed; approved runner, protected refs and artifact access/retention configured.
+- [ ] No executable Generic Package Registry publishing or embedded CI/import credentials.
 - [ ] Automated setup/settings tests and available full regression suites passed.
 - [ ] Fresh EXE and/or ZIP setup tested as a normal user on a corporate device.
 - [ ] Visible app, shortcuts where applicable, real study, zones, baseline and plots tested.

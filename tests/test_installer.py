@@ -222,7 +222,7 @@ def test_installer_bundles_application_and_removes_updater():
     recipe = (SCRIPT.parent / "CanopyExplorationProcessor.iss").read_text()
     assert 'Source: "{#MyPayloadDir}\\release.json"' in recipe
     assert 'Source: "{#MyPayloadDir}\\canopy_exploration_processor-{#MyAppVersion}-py3-none-any.whl"' in recipe
-    assert 'OutputDir=..\\dist\\github-release\\v{#MyAppVersion}' in recipe
+    assert 'OutputDir=..\\dist\\releases\\v{#MyAppVersion}' in recipe
     assert 'Source: "CanopyExplorationUpdate.bat"' not in recipe
     assert 'Name: "{group}\\Update Canopy Exploration Processor";' not in recipe
     assert 'Type: files; Name: "{app}\\CanopyExplorationUpdate.bat"' in recipe

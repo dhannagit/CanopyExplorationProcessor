@@ -2,6 +2,10 @@
   #define MyAppVersion "0.1.0"
 #endif
 
+#ifndef MyPayloadDir
+  #error "Build with installer\build_release.ps1 -CompileInstaller to provide the GitHub release payload."
+#endif
+
 [Setup]
 AppId={{B8651CE7-CE87-46C4-889F-5437C544C20B}
 AppName=Canopy Exploration Processor
@@ -11,7 +15,7 @@ DefaultGroupName=Canopy Exploration Processor
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-OutputDir=output
+OutputDir=..\dist\github-release\v{#MyAppVersion}
 OutputBaseFilename=CanopyExplorationProcessor-{#MyAppVersion}-Setup
 Compression=lzma2
 SolidCompression=yes
@@ -24,14 +28,19 @@ UninstallDisplayName=Canopy Exploration Processor
 Source: "deployment.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "setup_environment.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "CanopyExplorationStart.bat"; DestDir: "{app}"; Flags: ignoreversion
-Source: "CanopyExplorationUpdate.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "remove_environment.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\docs\DISTRIBUTION.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyPayloadDir}\release.json"; DestDir: "{app}\payload"; Flags: ignoreversion
+Source: "{#MyPayloadDir}\canopy_exploration_processor-{#MyAppVersion}-py3-none-any.whl"; DestDir: "{app}\payload"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Canopy Exploration Processor"; Filename: "{app}\CanopyExplorationStart.bat"; WorkingDir: "{app}"
-Name: "{group}\Update Canopy Exploration Processor"; Filename: "{app}\CanopyExplorationUpdate.bat"; WorkingDir: "{app}"
 Name: "{group}\Uninstall"; Filename: "{uninstallexe}"
+
+[InstallDelete]
+Type: files; Name: "{app}\CanopyExplorationUpdate.bat"
+Type: files; Name: "{group}\Update Canopy Exploration Processor.lnk"
+Type: files; Name: "{app}\payload\canopy_exploration_processor-*-py3-none-any.whl"
 
 [UninstallDelete]
 Type: files; Name: "{app}\.deployment.lock"

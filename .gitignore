@@ -1,5 +1,7 @@
 # .gitignore
 .venv/
+.pytest_cache/
+.ruff_cache/
 __pycache__/
 *.pyc
 BaselineExample/
@@ -10,5 +12,5 @@ DATA_raw/
 build/
 dist/
 *.egg-info/
-installer/output/
+/canopy_exploration_processor-*/
 *.json

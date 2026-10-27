@@ -36,7 +36,7 @@ Record decisions that affect the design or future maintenance. Use one entry per
 
 ## ADR-005 - Deploy through Artifactory with private Windows environments
 
-**Status:** Accepted
+**Status:** Superseded by ADR-008 for application delivery and update policy.
 
 **Decision:** Distribute a versioned Python wheel and a thin Inno Setup installer
 for managed Windows x64 PCs. Use corporate uv tooling and Python 3.13, with a
@@ -82,6 +82,24 @@ fingerprint match. External baseline headers must independently match approval.
 **Reason:** Recipes stay small and reproducible while avoiding stale cached data
 and hidden automatic analysis. Schema version 2 deliberately replaces the
 pre-production format without a migration layer.
+
+## ADR-008 - Deliver standalone applications through GitHub Releases
+
+**Status:** Accepted
+
+**Decision:** Publish the application as versioned GitHub Release assets: a Windows
+setup ZIP, an optional Inno EXE, the normal Python wheel/source archive, a manifest
+and checksums. Bundle the exact application wheel with setup. Fetch only third-party
+runtime dependencies from corporate Artifactory using the embedded hashed lock.
+Install into a candidate environment, validate it, and atomically activate it.
+Users upgrade explicitly by installing a newer GitHub Release; normal launch does
+not perform update/network checks. Preserve explicit rollback and user preferences.
+
+**Reason:** The app currently needs independent distribution rather than company
+updater integration. Keeping a normal wheel and existing package boundaries leaves
+future host-tool/module integration open without imposing a plugin framework now.
+Build on corporate Windows with Artifactory access, then upload final app artifacts;
+do not assume public GitHub runners can reach internal dependency repositories.
 
 ## Presentation Evidence To Capture
 

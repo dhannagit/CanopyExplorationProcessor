@@ -1,9 +1,10 @@
 param(
-    [ValidateSet('Setup', 'Launch', 'Update', 'Rollback', 'Remove', 'CheckIdle')]
+    [ValidateSet('Setup', 'Launch', 'Rollback', 'Remove', 'CheckIdle')]
     [string]$Mode = 'Launch',
     [string]$InstallDirectory = $PSScriptRoot,
     [string]$IndexUrl = 'https://artifactory.michelin.com/api/pypi/pypi/simple',
-    [string]$ReleaseVersion = ''
+    [string]$ReleaseVersion = '',
+    [string]$PayloadDirectory = (Join-Path $PSScriptRoot 'payload')
 )
 
 Set-StrictMode -Version Latest
@@ -110,46 +111,49 @@ function Invoke-Tool([string]$Executable, [string[]]$ToolArguments, [int]$Timeou
 function Install-Release($CurrentState) {
     $uri = [uri]$IndexUrl
     if ($uri.Scheme -ne 'https' -or $uri.UserInfo) { throw 'Use an HTTPS repository URL without embedded credentials' }
-    if (Test-RunningSession) {
-        if ($CurrentState) { Write-Log 'Update deferred: an application session is running'; return }
-        throw 'Close running Canopy sessions before setup'
+    if (Test-RunningSession) { throw 'Close Canopy sessions before setup' }
+    $manifestPath = Join-Path $PayloadDirectory 'release.json'
+    if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'Release payload is missing release.json; download the complete GitHub Release installer or ZIP' }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $version = $manifest.version
+    if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Only stable major.minor.patch releases are supported' }
+    if ($ReleaseVersion -and $ReleaseVersion -ne $version) { throw 'Installer and bundled release versions do not match' }
+    if ($manifest.python -ne '3.13' -or $manifest.platform -ne 'Windows x64') { throw 'Unsupported release platform or Python version' }
+    $expectedWheel = "canopy_exploration_processor-$version-py3-none-any.whl"
+    if ($manifest.wheel -ne $expectedWheel) { throw 'Release manifest contains an unexpected wheel filename' }
+    $wheel = Join-Path $PayloadDirectory $expectedWheel
+    if (-not (Test-Path -LiteralPath $wheel)) { throw 'Bundled application wheel is missing' }
+    if ($manifest.wheelSha256 -notmatch '^[a-fA-F0-9]{64}$' -or (Get-FileHash -LiteralPath $wheel -Algorithm SHA256).Hash -ne $manifest.wheelSha256) {
+        throw 'Bundled application wheel checksum does not match release.json'
+    }
+    if ($CurrentState) {
+        if ([version]$version -lt [version]$CurrentState.version) { throw 'An older release cannot replace the installed version; use Rollback for recovery' }
+        if ($version -eq $CurrentState.version) { Write-Log "Already on release $version"; return }
     }
     $uv = Find-Uv
-    if ($ReleaseVersion -and ($Mode -ne 'Setup' -or $ReleaseVersion -notmatch '^\d+\.\d+\.\d+$')) {
-        throw 'An exact stable release version may only be selected during setup'
-    }
     $name = 'release-' + [guid]::NewGuid().ToString('N')
     $candidate = Get-EnvironmentPath $name
     $python = Join-Path $candidate 'Scripts\python.exe'
     $activated = $false
     try {
         Invoke-Tool $uv @('venv', $candidate, '--python', '3.13') | Out-Null
-        $requirement = $PackageName
-        if ($ReleaseVersion) { $requirement += '==' + $ReleaseVersion }
-        elseif ($CurrentState) { $requirement += '>=' + $CurrentState.version }
-        Invoke-Tool $uv @('pip', 'install', '--python', $python, '--index-url', $IndexUrl,
-            '--prerelease', 'disallow', '--no-deps', '--only-binary', ':all:', $requirement) | Out-Null
-        $version = (Invoke-Tool $python @('-c', "from importlib.metadata import version; print(version('$PackageName'))")).Trim()
-        if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Only stable major.minor.patch releases are supported' }
-        if ($CurrentState -and ([version]$version -le [version]$CurrentState.version)) {
-            if ($Mode -eq 'Update' -and ($CurrentState.PSObject.Properties.Name -contains 'updatesPaused') -and $CurrentState.updatesPaused) {
-                $CurrentState.updatesPaused = $false
-                Write-State $CurrentState
-            }
-            Write-Log "Already on stable release $($CurrentState.version)"
-            return
-        }
+        Invoke-Tool $uv @('pip', 'install', '--python', $python, '--no-index', '--no-deps', $wheel) | Out-Null
+        $installedVersion = (Invoke-Tool $python @('-c', "from importlib.metadata import version; print(version('$PackageName'))")).Trim()
+        if ($installedVersion -ne $version) { throw 'Installed wheel version does not match release.json' }
         $lock = (Invoke-Tool $python @('-c', "from importlib.metadata import distribution; print(distribution('$PackageName').locate_file('canopy_processor/runtime-requirements.txt'))")).Trim()
         if (-not (Test-Path -LiteralPath $lock)) { throw 'Release wheel is missing its dependency lock' }
+        if ($manifest.lockSha256 -notmatch '^[a-fA-F0-9]{64}$' -or (Get-FileHash -LiteralPath $lock -Algorithm SHA256).Hash -ne $manifest.lockSha256) {
+            throw 'Runtime dependency lock checksum does not match release.json'
+        }
         Invoke-Tool $uv @('pip', 'install', '--python', $python, '--index-url', $IndexUrl,
             '--require-hashes', '--only-binary', ':all:', '-r', $lock) | Out-Null
         Invoke-Tool $uv @('pip', 'check', '--python', $python) | Out-Null
         Invoke-Tool $python @('-m', 'canopy_processor.ui.smoke_test') | Out-Null
         $previous = $null
         if ($CurrentState) { $previous = $CurrentState.current }
-        Write-State ([ordered]@{current = $name; previous = $previous; version = $version; updatesPaused = $false})
+        Write-State ([ordered]@{current = $name; previous = $previous; version = $version})
         $activated = $true
-        Write-Log "Activated stable release $version"
+        Write-Log "Activated bundled GitHub release $version"
     } finally {
         if (-not $activated -and (Test-Path -LiteralPath $candidate)) {
             Remove-Item -LiteralPath $candidate -Recurse -Force
@@ -170,8 +174,8 @@ function Restore-PreviousRelease($State) {
     $python = Join-Path (Get-EnvironmentPath $State.previous) 'Scripts\python.exe'
     $version = (Invoke-Tool $python @('-c', "from importlib.metadata import version; print(version('$PackageName'))")).Trim()
     Invoke-Tool $python @('-m', 'canopy_processor.ui.smoke_test') | Out-Null
-    Write-State ([ordered]@{current = $State.previous; previous = $State.current; version = $version; updatesPaused = $true})
-    Write-Log "Rolled back to $version; run the manual updater to resume automatic updates"
+    Write-State ([ordered]@{current = $State.previous; previous = $State.current; version = $version})
+    Write-Log "Rolled back to $version; launch does not check for updates"
 }
 
 function Remove-Releases {
@@ -207,18 +211,7 @@ try {
     $state = Read-State
     switch ($Mode) {
         'Setup' { Install-Release $state }
-        'Update' { Install-Release $state }
-        'Launch' {
-            try {
-                if (-not $state -or -not ($state.PSObject.Properties.Name -contains 'updatesPaused') -or -not $state.updatesPaused) {
-                    Install-Release $state
-                }
-            } catch {
-                Write-Log "Automatic update failed: $($_.Exception.Message)"
-                if (-not $state) { throw }
-            }
-            Start-Application (Read-State)
-        }
+        'Launch' { Start-Application $state }
         'Rollback' { Restore-PreviousRelease $state }
         'CheckIdle' { if (Test-RunningSession) { throw 'Close Canopy before continuing' } }
         'Remove' { Remove-Releases }

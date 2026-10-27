@@ -2,6 +2,31 @@
 
 This is the chronological engineering record for the Python migration. Keep entries concise and factual. Each entry should capture what changed, why it changed, how it was verified, and what comes next.
 
+## 2026-10-27 - GitHub Release distribution
+
+**Goal:** Distribute standalone releases on GitHub while retaining corporate
+Artifactory for third-party dependencies and a normal wheel for future integration.
+
+**Changed:** Bundle a checksum-verified wheel/manifest in Windows setup; remove the
+corporate app updater and launch-time checks; generate versioned Windows ZIP,
+wheel/source archive, manifest and checksums for GitHub upload. Retain staged
+installation, rollback, private environments and per-user settings. Update the
+Inno recipe, deployment guide and repository README. Use fresh build output paths
+to avoid overwriting pre-existing administrator-owned artifacts.
+
+**Evidence:** The fixture-independent regression run passed 81 tests with five
+dataset-dependent tests deselected. The generated ZIP installed from its bundled
+wheel with UV_FIND_LINKS cleared; locked dependencies came from corporate
+Artifactory. An installed Qt/Matplotlib/native-library smoke check passed outside
+the checkout, followed by same-version no-op setup and app-owned removal. Payload
+integrity tests cover invalid/missing manifests, wheel hashes, version and lock
+mismatches, downgrade rejection and preservation of the active environment.
+
+**Next:** Upload tested assets to a draft GitHub Release after committing/tagging
+the source. No upload or tag was created automatically. Inno Setup is not installed
+here, so the EXE recipe remains uncompiled; the Windows ZIP is usable without it.
+Validate signing policy and normal-user installation on a teammate's device.
+
 ## Entry Format
 
 ```markdown

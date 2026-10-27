@@ -1,7 +1,7 @@
 # Canopy Exploration Processor
 
-Windows workbench for analyzing Canopy simulation sweeps, turn zones, baselines
-and performance plots.
+Windows workbench for analyzing Canopy simulation sweeps, with filtering for turn zones, 
+baselines and performance plots.
 
 ## Install
 

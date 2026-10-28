@@ -1,7 +1,6 @@
 param(
     [string]$IndexUrl = 'https://artifactory.michelin.com/api/pypi/pypi/simple',
     [switch]$RefreshLock,
-    [switch]$CompileInstaller,
     [switch]$SignRelease
 )
 
@@ -55,7 +54,7 @@ try {
     foreach ($file in @('DISTRIBUTION.md', 'DECISIONS.md', 'BUILD_LOG.md')) {
         Copy-Item -LiteralPath (Join-Path $root "docs\$file") -Destination (Join-Path $buildSource 'docs')
     }
-    Get-ChildItem -LiteralPath $PSScriptRoot -File | Where-Object Extension -In '.ps1', '.bat', '.iss', '.py' |
+    Get-ChildItem -LiteralPath $PSScriptRoot -File | Where-Object Extension -In '.ps1', '.bat', '.nsi', '.py' |
         Copy-Item -Destination (Join-Path $buildSource 'installer')
     Copy-Item -Path (Join-Path $root 'ci\*.ps1') -Destination (Join-Path $buildSource 'ci')
     Get-ChildItem -Path (Join-Path $root 'tests\test_*.py') -File |
@@ -101,26 +100,6 @@ try {
     Compress-Archive -LiteralPath $bundle -DestinationPath $zip
     $sdist = Join-Path $buildOutput "canopy_exploration_processor-$version.tar.gz"
     Copy-Item -LiteralPath $wheel, $sdist, $manifestPath -Destination $assets
-    if ($CompileInstaller) {
-        $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-        $compilerPath = if ($compiler) { $compiler.Source } else { $null }
-        foreach ($directory in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
-            $candidate = Join-Path $directory 'Inno Setup 6\ISCC.exe'
-            if (-not $compilerPath -and (Test-Path -LiteralPath $candidate)) { $compilerPath = $candidate }
-        }
-        if (-not $compilerPath) { throw 'Install approved Inno Setup 6 to compile the Windows installer' }
-        if (-not (Test-Path -LiteralPath $compilerPath)) { throw 'Install approved Inno Setup 6 to compile the Windows installer' }
-        $compilerArguments = @("/DMyAppVersion=$version", "/DMyPayloadDir=$(Join-Path $bundle 'payload')", "/O$assets")
-        if ($SignRelease) {
-            $signCommand = 'powershell.exe -NoProfile -NonInteractive -File $q' + $signingWrapper + '$q -Path $f -Kind Executable'
-            $compilerArguments += @('/DMySignedRelease', ('/Scanopy=' + $signCommand))
-        }
-        & $compilerPath @compilerArguments (Join-Path $buildSource 'installer\CanopyExplorationProcessor.iss')
-        if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
-        if ($SignRelease) {
-            & $signingWrapper -Path (Join-Path $assets "CanopyExplorationProcessor-$version-Setup.exe") -Kind Executable -VerifyOnly
-        }
-    }
     $checksums = Get-ChildItem -LiteralPath $assets -File | Sort-Object Name | ForEach-Object {
         (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $_.Name
     }

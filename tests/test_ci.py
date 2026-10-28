@@ -2,12 +2,25 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tomllib
 
 import pytest
 import yaml
 
 
 ROOT = Path(__file__).parents[1]
+
+
+def test_public_commands_use_full_product_name():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    assert set(project["scripts"]) == {"canopy-exploration-processor-gui"}
+    assert set(project["gui-scripts"]) == {"canopy-exploration-processor"}
+
+    entry_points = (ROOT / "src" / "canopy_exploration_processor.egg-info" / "entry_points.txt").read_text()
+    assert "canopy-exploration-processor-gui = canopy_processor.ui.app:main" in entry_points
+    assert "canopy-exploration-processor = canopy_processor.ui.app:main" in entry_points
+    metadata = (ROOT / "src" / "canopy_exploration_processor.egg-info" / "PKG-INFO").read_text()
+    assert "Summary: Canopy Exploration Processor for analyzing Canopy simulation sweeps." in metadata
 
 
 def test_pipeline_is_opt_in_protected_and_artifact_only():
@@ -29,9 +42,18 @@ def test_pipeline_is_opt_in_protected_and_artifact_only():
     assert pipeline["release_windows"]["artifacts"]["access"] == "developer"
     assert pipeline["package_windows"]["artifacts"]["expire_in"] == "7 days"
     assert "environment" not in pipeline["package_windows"]
-    assert pipeline["release_windows"]["needs"][0]["job"] == "test_windows"
+    assert [need["job"] for need in pipeline["release_windows"]["needs"]] == [
+        "package_windows", "windows-makensis 🧳"
+    ]
     assert pipeline["release_windows"]["rules"][0]["allow_failure"] is False
-    assert "include" not in pipeline
+    assert pipeline["include"][0]["file"] == [
+        "global-settings.yml", "jobs-builder/win-makensis.yml"
+    ]
+    assert pipeline["stages"].index("installer") < pipeline["stages"].index("release")
+    assert pipeline["windows-makensis 🧳"]["needs"][0]["job"] == "package_windows"
+    assert pipeline["windows-makensis 🧳"]["artifacts"]["paths"] == [
+        "nsis_compile_files/*.exe"
+    ]
     assert pipeline["package_windows"]["needs"][0]["job"] == "test_windows"
     assert pipeline["package_windows"]["artifacts"]["paths"] == ["dist/releases/"]
     assert pipeline["test_windows"]["artifacts"]["reports"]["junit"] == "reports/junit.xml"

@@ -2,7 +2,14 @@ stages:
   - preflight
   - test
   - package
+  - installer
   - release
+
+include:
+  - project: dord/infra/central-ci-cd/ci-cd
+    file:
+      - global-settings.yml
+      - jobs-builder/win-makensis.yml
 
 variables:
   CANOPY_CI_ENABLED: "false"
@@ -136,35 +143,104 @@ package_windows:
     CANOPY_BUILD_KIND: "preview"
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/ && $CI_COMMIT_REF_PROTECTED == "true" && $CANOPY_COMPILE_INSTALLER == "true" && $CANOPY_RELEASE_APPROVED == "true" && ($CANOPY_SIGNING_POLICY == "required" || $CANOPY_SIGNING_POLICY == "not-required")'
+      variables:
+        CANOPY_BUILD_KIND: "production"
     - when: never
   artifacts:
     access: developer
-    name: "Canopy-$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
+    name: "CanopyExplorationProcessor-$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
     when: on_success
     expire_in: 7 days
     paths:
       - dist/releases/
 
+"windows-makensis 🧳":
+  stage: installer
+  needs:
+    - job: package_windows
+      artifacts: true
+  variables:
+    NSIS_FILE: "installer/CanopyExplorationProcessor.nsi"
+    NSIS_USE_SUBMODULE_PLUGIN: ""
+    NSIS_SIGN_BINARY: "false"
+  before_script:
+    - |
+      $ErrorActionPreference = 'Stop'
+      if (-not (Test-Path -LiteralPath $env:NSIS_FILE -PathType Leaf)) {
+        throw 'NSIS installer source is missing'
+      }
+      $manifests = @(Get-ChildItem -LiteralPath 'dist/releases' -Filter 'release-*.json' -File -Recurse)
+      if ($manifests.Count -ne 1) { throw 'Expected exactly one package release manifest' }
+      $manifest = Get-Content -LiteralPath $manifests[0].FullName -Raw | ConvertFrom-Json
+      if ($env:CI_COMMIT_TAG -and $env:CI_COMMIT_TAG -ne "v$($manifest.version)") {
+        throw 'Package version does not match the release tag'
+      }
+      $archive = Join-Path $manifests[0].DirectoryName "CanopyExplorationProcessor-$($manifest.version)-Windows-x64.zip"
+      if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) { throw 'Windows bundle ZIP is missing from package artifacts' }
+      $inputRoot = Join-Path $env:CI_PROJECT_DIR 'nsis-input'
+      if (Test-Path -LiteralPath $inputRoot) { Remove-Item -LiteralPath $inputRoot -Recurse -Force }
+      New-Item -ItemType Directory -Force -Path $inputRoot | Out-Null
+      Expand-Archive -LiteralPath $archive -DestinationPath $inputRoot
+      $bundle = Join-Path $inputRoot "CanopyExplorationProcessor-$($manifest.version)-Windows-x64"
+      if (-not (Test-Path -LiteralPath (Join-Path $bundle 'payload\release.json'))) {
+        throw 'Extracted bundle has no application payload'
+      }
+      $env:PRODUCT_VERSION = $manifest.version
+      $env:CANOPY_BUNDLE_DIR = $bundle
+      $env:CANOPY_NSIS_OUTPUT = Join-Path $env:CI_PROJECT_DIR "CanopyExplorationProcessor-$($manifest.version)-Setup.exe"
+      $env:CANOPY_SIGNING_WRAPPER = Join-Path $env:CI_PROJECT_DIR 'ci\sign_artifact.ps1'
+      $env:CANOPY_SIGN_RELEASE = 'false'
+      $env:NSIS_CMD_PARAMS = ''
+      if ($env:CI_COMMIT_TAG) {
+        if ($env:CANOPY_RELEASE_APPROVED -ne 'true' -or
+            $env:CANOPY_SIGNING_POLICY -notin @('required', 'not-required')) {
+          throw 'Protected release installer needs release approval and an explicit signing policy'
+        }
+        if ($env:CANOPY_SIGNING_POLICY -eq 'required') {
+          & $env:CANOPY_SIGNING_WRAPPER -CheckConfiguration
+          $env:CANOPY_SIGN_RELEASE = 'true'
+          $env:NSIS_CMD_PARAMS = '/DCANOPY_SIGN_RELEASE'
+        }
+      }
+      Write-Output "NSIS source bundle: $bundle"
+      Write-Output "NSIS output: $env:CANOPY_NSIS_OUTPUT"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $CANOPY_COMPILE_INSTALLER == "true"'
+      when: on_success
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/ && $CI_COMMIT_REF_PROTECTED == "true" && $CANOPY_COMPILE_INSTALLER == "true" && $CANOPY_RELEASE_APPROVED == "true" && ($CANOPY_SIGNING_POLICY == "required" || $CANOPY_SIGNING_POLICY == "not-required")'
+      when: on_success
+    - when: never
+  artifacts:
+    access: developer
+    name: "CanopyExplorationProcessor-NSIS-$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
+    when: on_success
+    expire_in: 7 days
+    paths:
+      - nsis_compile_files/*.exe
+
 release_windows:
   stage: release
-  needs:
-    - job: test_windows
-      artifacts: false
   variables:
     CANOPY_BUILD_KIND: "production"
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/ && $CI_COMMIT_REF_PROTECTED == "true" && $CANOPY_RELEASE_APPROVED == "true" && ($CANOPY_SIGNING_POLICY == "required" || $CANOPY_SIGNING_POLICY == "not-required")'
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/ && $CI_COMMIT_REF_PROTECTED == "true" && $CANOPY_RELEASE_APPROVED == "true" && $CANOPY_COMPILE_INSTALLER == "true" && ($CANOPY_SIGNING_POLICY == "required" || $CANOPY_SIGNING_POLICY == "not-required")'
       when: manual
       allow_failure: false
     - when: never
+  needs:
+    - job: package_windows
+      artifacts: true
+    - job: "windows-makensis 🧳"
+      artifacts: true
   environment:
     name: production/windows
     deployment_tier: production
   script:
-    - powershell.exe -NoProfile -NonInteractive -File .\ci\run.ps1 -Phase Package
+    - powershell.exe -NoProfile -NonInteractive -File .\ci\run.ps1 -Phase Finalize
   artifacts:
     access: developer
-    name: "Canopy-$CI_COMMIT_TAG-$CI_COMMIT_SHORT_SHA"
+    name: "CanopyExplorationProcessor-$CI_COMMIT_TAG-$CI_COMMIT_SHORT_SHA"
     when: on_success
     expire_in: 90 days
     paths:

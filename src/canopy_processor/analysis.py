@@ -1,4 +1,4 @@
-"""Filtering and reduction of Canopy metrics.
+"""Filtering and reduction of Canopy simulation metrics.
 
 This module reduces one run's metric signal to one value using phase and
 turn-zone masks. Joining reduced results across many runs to their

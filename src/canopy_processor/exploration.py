@@ -1,4 +1,4 @@
-"""Discover sweep variables from Canopy exploration artifacts."""
+"""Discover sweep variables from Canopy simulation exploration artifacts."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class JobRecord:
-    """Metadata for one numbered Canopy job folder."""
+    """Metadata for one numbered Canopy simulation job folder."""
 
     index: int
     name: str
@@ -32,7 +32,7 @@ class SweepVariable:
 
 @dataclass(frozen=True)
 class ExplorationDefinition:
-    """Canopy factorial/exploration metadata in user-facing form."""
+    """Canopy simulation factorial/exploration metadata in user-facing form."""
 
     design_name: str | None
     variables: tuple[SweepVariable, ...]
@@ -41,7 +41,7 @@ class ExplorationDefinition:
 
 
 def load_exploration_definition(raw_directory: str | Path) -> ExplorationDefinition:
-    """Load Canopy's exploration-map and input metadata files."""
+    """Load Canopy simulation exploration-map and input metadata files."""
 
     directory = Path(raw_directory)
     map_path = directory / "exploration-map.json"
@@ -81,7 +81,7 @@ def load_exploration_definition(raw_directory: str | Path) -> ExplorationDefinit
 def discover_job_variables(raw_directory: str | Path) -> tuple[SweepVariable, ...]:
     """Discover numeric changed paths from per-run job-document files.
 
-    This fallback is useful when Canopy's aggregate exploration artifacts are
+    This fallback is useful when the Canopy simulation's aggregate exploration artifacts are
     absent. Values retain the numeric run-folder ordering.
     """
 
@@ -106,7 +106,7 @@ def discover_job_variables(raw_directory: str | Path) -> tuple[SweepVariable, ..
 
 
 def load_job_records(raw_directory: str | Path) -> tuple[JobRecord, ...]:
-    """Load numbered job documents and classify Canopy post-processing jobs."""
+    """Load numbered job documents and classify Canopy simulation post-processing jobs."""
 
     directory = Path(raw_directory)
     records: list[JobRecord] = []
@@ -140,7 +140,7 @@ def load_job_records(raw_directory: str | Path) -> tuple[JobRecord, ...]:
 
 
 def _unwrap_coordinate(value: Any) -> Any:
-    """Unwrap Canopy's one-element coordinate arrays."""
+    """Unwrap one-element coordinate arrays from Canopy simulation metadata."""
 
     while isinstance(value, list) and len(value) == 1:
         value = value[0]

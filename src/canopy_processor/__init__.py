@@ -1,4 +1,4 @@
-"""Core loading and normalization utilities for Canopy explorations."""
+"""Core loading and normalization utilities for Canopy simulation explorations."""
 
 from .dxpx import DXPXLoadError, DXPXRun, load_dxpx, load_dxpx_laps
 from .config import (

@@ -1,4 +1,4 @@
-"""Metric definitions for Canopy explorations.
+"""Metric definitions for Canopy simulation explorations.
 
 This module deliberately does not perform filtering or plotting. A metric
 describes what signal to read from one :class:`DXPXRun`; the analysis layer can

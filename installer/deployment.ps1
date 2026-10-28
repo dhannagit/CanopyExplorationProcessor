@@ -114,7 +114,7 @@ function Invoke-Tool([string]$Executable, [string[]]$ToolArguments, [int]$Timeou
 function Install-Release($CurrentState) {
     $uri = [uri]$IndexUrl
     if ($uri.Scheme -ne 'https' -or $uri.UserInfo) { throw 'Use an HTTPS repository URL without embedded credentials' }
-    if (Test-RunningSession) { throw 'Close Canopy sessions before setup' }
+    if (Test-RunningSession) { throw 'Close Canopy Exploration Processor sessions before setup' }
     $manifestPath = Join-Path $PayloadDirectory 'release.json'
     if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'Release payload is missing release.json; download the complete installer or ZIP job artifact' }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
@@ -184,7 +184,7 @@ function Start-Application($State) {
 }
 
 function Restore-PreviousRelease($State) {
-    if (Test-RunningSession) { throw 'Close Canopy before rolling back' }
+    if (Test-RunningSession) { throw 'Close Canopy Exploration Processor before rolling back' }
     if (-not $State -or -not $State.previous) { throw 'No previous release is available' }
     $python = Join-Path (Get-EnvironmentPath $State.previous) 'Scripts\python.exe'
     $version = (Invoke-Tool $python @('-c', "from importlib.metadata import version; print(version('$PackageName'))")).Trim()
@@ -205,7 +205,7 @@ function Remove-ManagedEnvironment([string]$Name) {
 }
 
 function Remove-Releases {
-    if (Test-RunningSession) { throw 'Close Canopy before uninstalling' }
+    if (Test-RunningSession) { throw 'Close Canopy Exploration Processor before uninstalling' }
     if (Test-Path -LiteralPath $EnvironmentDirectory) {
         foreach ($directory in Get-ChildItem -LiteralPath $EnvironmentDirectory -Directory) {
             if ($directory.Name -match '^release-[a-f0-9]{32}$') {
@@ -240,12 +240,12 @@ try {
         'Setup' { Install-Release $state }
         'Launch' { Start-Application $state }
         'Rollback' { Restore-PreviousRelease $state }
-        'CheckIdle' { if (Test-RunningSession) { throw 'Close Canopy before continuing' } }
+        'CheckIdle' { if (Test-RunningSession) { throw 'Close Canopy Exploration Processor before continuing' } }
         'Remove' { Remove-Releases }
     }
 } catch {
     Write-Log "Deployment failed: $($_.Exception.Message)"
-    [Console]::Error.WriteLine("Canopy deployment failed: $($_.Exception.Message). Logs: $LogPath")
+    [Console]::Error.WriteLine("Canopy Exploration Processor deployment failed: $($_.Exception.Message). Logs: $LogPath")
     exit 1
 } finally {
     if ($guard) { $guard.Dispose() }

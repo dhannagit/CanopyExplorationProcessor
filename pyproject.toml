@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "canopy-exploration-processor"
 version = "0.1.0"
-description = "Exploration-agnostic analysis of Canopy simulation sweeps."
+description = "Canopy Exploration Processor for analyzing Canopy simulation sweeps."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -30,10 +30,10 @@ url = "https://artifactory.michelin.com/api/pypi/pypi/simple"
 default = true
 
 [project.scripts]
-canopy-exploration-gui = "canopy_processor.ui.app:main"
+canopy-exploration-processor-gui = "canopy_processor.ui.app:main"
 
 [project.gui-scripts]
-canopy-exploration = "canopy_processor.ui.app:main"
+canopy-exploration-processor = "canopy_processor.ui.app:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

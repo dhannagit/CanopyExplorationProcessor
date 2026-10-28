@@ -1,4 +1,4 @@
-"""Remove only Canopy-managed environments, including long Windows paths."""
+"""Remove only Canopy Exploration Processor-managed environments, including long Windows paths."""
 
 import argparse
 import os

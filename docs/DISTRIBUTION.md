@@ -66,9 +66,8 @@ Local study data and workbooks are not part of the release.
 3. Use a development environment with GUI/test dependencies. CI creates a separate
    `.ci-venv` using `uv sync --locked --extra gui --extra test --group dev`.
    Recipients do not need the development environment.
-4. To include an EXE, install approved Inno Setup 6.3 or later within version 6.
-   Confirm its licence covers the intended corporate use. A compiler reporting
-   "Non-commercial use only" needs review by IT before corporate distribution.
+4. To include an EXE, use the protected GitLab pipeline's approved corporate NSIS
+   job. Confirm the shared job's compiler image and licensing with the CI owner.
 5. Confirm whether IT requires signed PowerShell scripts, the setup EXE or the
    generated uninstaller. Local scripts working unsigned is not proof that
    downloaded scripts will be allowed on teammates' PCs.
@@ -85,9 +84,8 @@ The provided pipeline does not assume access from public/shared Linux runners.
   locked dependency. Authentication and corporate certificate trust must be
   configured through approved tooling, not embedded in this release.
 - Permission to write to the install folder. The EXE defaults to
-  `C:\Bib\Prod\CanopyExplorationProcessor` and does not request admin elevation.
-  IT may need to provision that folder. A stable folder under `%LOCALAPPDATA%`
-  can be chosen instead. Later upgrades also need write access.
+   `%LOCALAPPDATA%\Canopy Exploration Processor` and does not request admin
+   elevation. Later upgrades also need write access.
 - PowerShell scripts allowed by corporate execution policy and application-control
   rules. Do not disable certificate checks or bypass IT policy to install.
 
@@ -104,13 +102,12 @@ The company template references `dxp/sk/shared-ci-workflows` at ref `1`, file
 `dord/infra/central-ci-cd/ci-cd`. Its Windows jobs use tag `az-weu-wind`, but that
 does not prove a runner with that tag has this app's required tools.
 
-This project therefore starts with a self-contained, **disabled-by-default**
-pipeline. It does not import unverified publishing jobs, template OAuth code,
-secret-embedding hooks, or PyInstaller/NSIS defaults. The tested wheel/private-env
-deployment and optional Inno compiler remain unchanged. Company approval of the
-packaging route is still required; this integration does not decide that policy.
-If the shared workflow is mandated, obtain its expanded YAML and adapt the local
-jobs through supported overrides before enabling them.
+This project therefore starts with a **disabled-by-default** pipeline. It imports
+the company's NSIS compiler job only; application packaging, artifact handoff,
+signing policy and installer smoke checks remain explicit in this repository. It
+does not import publishing jobs, template OAuth code or secret-embedding hooks.
+Company approval of the packaging route is still required; this integration does
+not decide that policy.
 
 Ask the runner/tooling owner to confirm:
 
@@ -118,7 +115,7 @@ Ask the runner/tooling owner to confirm:
    workstation. Set `CANOPY_WINDOWS_IMAGE` to a company-approved Windows image in
    `docker.artifactory.michelin.com`, pinned by version tag or SHA-256 digest. Empty,
    unversioned, non-corporate and `latest` references are rejected. No default image
-   is invented: the docs do not identify a suitable Python 3.13/uv/Inno image.
+   is invented: the docs do not identify a suitable Python 3.13/uv Windows image.
    The container base OS must match the runner's requirements.
 2. The image contains approved `uv`, Python 3.13, PowerShell and CIM process-query
    support. Preflight uses `uv python find --offline 3.13`; it does not install missing
@@ -130,8 +127,8 @@ Ask the runner/tooling owner to confirm:
    including the registry dependencies and build backend. Keep secrets in approved
    service/CI configuration, not the repository or index URL. Index URLs are recorded
    in release metadata and must not contain credentials.
-4. If EXE builds are approved, licensed Inno Setup 6 and any required signing
-   service are available. The first run can build ZIP-only artifacts instead.
+4. If EXE builds are approved, the included shared NSIS job is available to this
+   project and its compiler image and any required signing service are approved.
 5. Artifact-only distribution, classification, audience and retention are explicitly
    approved. General company guidance uses Artifactory for binaries; it does not
    establish an exception for durable GitLab job-artifact delivery. Absence of an
@@ -181,7 +178,7 @@ Project-level values override the safe defaults in `.gitlab-ci.yml`.
 | `CANOPY_WINDOWS_RUNNER_TAG` | `az-weu-wind` | Set to the confirmed approved Windows runner tag. |
 | `CANOPY_WINDOWS_IMAGE` | empty | Required approved versioned Windows image; no pipeline starts without it. |
 | `CANOPY_MR_VALIDATION_ENABLED` | `false` | Enable same-project MR checks only with safe non-production image/dependency access. Fork MR pipelines remain excluded. |
-| `CANOPY_COMPILE_INSTALLER` | `false` | Set to `true` only for approved Inno EXE builds; otherwise build ZIP/package assets. |
+| `CANOPY_COMPILE_INSTALLER` | `false` | Set to `true` only for approved protected-tag NSIS builds. |
 | `CANOPY_FULL_TESTS` | `false` | Set to `true` only after all approved sample datasets are available in the checkout. |
 | `CANOPY_RELEASE_APPROVED` | `false` | Protected owner approval of packaging, artifact delivery, audience and retention. |
 | `CANOPY_SIGNING_POLICY` | `unset` | Protected owner decision: `required` or `not-required`; unset blocks production. |
@@ -218,16 +215,21 @@ The jobs run in this order:
    and produce `reports/junit.xml`. By default this explicitly selects tests without
    external datasets; it is not a full numerical parity gate. Full tests require
    approved fixtures, not a copy committed to the repo or uploaded as artifacts.
-3. `package_windows`: on the protected default branch only, build team-preview
-   ZIP/package assets and optionally EXE, verify checksums,
-   install the ZIP in a temporary environment with its production dependency lock,
-   run the installed Qt/native-library smoke check and remove that test install.
-   It does not run on MR/tag pipelines or declare production.
-4. `release_windows`: for matching protected version tags, an authorized operator
-   manually starts production packaging after tests. The job exists only with
-   release approval and explicit signing policy. It declares `production/windows`,
-   applies required signing and runs the same artifact/install validation. This is
-   a blocking manual deployment, not automatic production delivery on branch pushes.
+3. `package_windows`: build versioned ZIP/package assets, verify checksums, install
+   the ZIP in a temporary environment with its production dependency lock, run the
+   installed Qt/native-library smoke check and remove that test install. Protected
+   default-branch artifacts are team previews; protected-tag packages are created
+   only when installer compilation and release approval are enabled.
+4. `windows-makensis`: consume the package job's ZIP, extract its bundled wheel and
+   deployment scripts, compile the NSIS setup EXE, and retain it as a job artifact.
+   This stage exists only when `CANOPY_COMPILE_INSTALLER=true` and ref/policy rules
+   allow it.
+5. `release_windows`: for matching protected version tags, an authorized operator
+   manually starts finalization after package and NSIS jobs. The job exists only
+   with release approval, installer compilation and explicit signing policy. It
+   adds the setup EXE, regenerates checksums, then smoke-installs and uninstalls
+   both release routes. It declares `production/windows`; this is a blocking manual
+   deployment, not automatic production delivery on branch pushes.
 
 Only successful package/release jobs upload `dist/releases/`. Preview artifacts
 expire after seven days; JUnit/preflight reports after 30 days. Production expiry
@@ -247,10 +249,9 @@ Local CI equivalents, from the repository root:
 .\ci\run.ps1 -Phase Package
 ```
 
-These commands use the same environment switches; for example, set
-`$env:CANOPY_COMPILE_INSTALLER = 'true'` only when intentionally testing the EXE
-route. Local invocations are validation/preview by default, not proof of production
-approval or a container run. The existing embedded production dependency lock is distinct from the
+Local packaging builds the ZIP and Python assets; NSIS compilation is performed by
+the shared GitLab job. Local invocations are validation/preview by default, not
+proof of production approval or a container run. The existing embedded production dependency lock is distinct from the
 development `uv.lock`. Do not routinely refresh either during a release build.
 
 ## Build A Release
@@ -288,7 +289,7 @@ $assets = Join-Path $PWD "dist\releases\v$version"
 Start with the setup and preferences tests:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_installer.py tests/test_ui_settings.py -q --basetemp (Join-Path $env:TEMP ('canopy-release-tests-' + [guid]::NewGuid().ToString('N')))
+.\.venv\Scripts\python.exe -m pytest tests/test_installer.py tests/test_ui_settings.py -q --basetemp (Join-Path $env:TEMP ('canopy-exploration-processor-release-tests-' + [guid]::NewGuid().ToString('N')))
 ```
 
 The final line should report tests passed, with no error traceback. The unique
@@ -299,7 +300,7 @@ For full analysis/GUI regression testing, provide the `DATA_Raw`, `DATA_dXpx` an
 be collected without these external fixtures:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q --basetemp (Join-Path $env:TEMP ('canopy-full-tests-' + [guid]::NewGuid().ToString('N')))
+.\.venv\Scripts\python.exe -m pytest -q --basetemp (Join-Path $env:TEMP ('canopy-exploration-processor-full-tests-' + [guid]::NewGuid().ToString('N')))
 ```
 
 Focused setup tests do not establish numerical parity. Record any unavailable
@@ -307,17 +308,16 @@ fixtures or untested workflows in the release notes.
 
 ### Step 4: Build The Downloads
 
-To create both the EXE and the ZIP:
+To create the ZIP and Python package assets locally:
 
 ```powershell
-.\installer\build_release.ps1 -CompileInstaller
+\.\installer\build_release.ps1
 ```
 
-For ZIP and Python-package assets only, without Inno:
-
-```powershell
-.\installer\build_release.ps1
-```
+The setup EXE is built in GitLab. Enable `CANOPY_COMPILE_INSTALLER` only after
+the protected Windows runner, NSIS job, artifact audience and signing policy have
+been approved. The release finalizer merges the NSIS job artifact with the package
+assets and repeats checksum and install/uninstall smoke checks.
 
 The build uses the committed dependency lock. Do not use `-RefreshLock` for an
 ordinary release: that option deliberately selects a new dependency set, requiring
@@ -336,7 +336,7 @@ Get-ChildItem -LiteralPath $assets
 
 | File | Who Needs It |
 | --- | --- |
-| `CanopyExplorationProcessor-<version>-Setup.exe` | Most Windows users; present only with `-CompileInstaller`. |
+| `CanopyExplorationProcessor-<version>-Setup.exe` | Most Windows users; produced by the protected GitLab NSIS job. |
 | `CanopyExplorationProcessor-<version>-Windows-x64.zip` | Users who prefer extracted-folder setup. |
 | `canopy_exploration_processor-<version>-py3-none-any.whl` | Python integration; not a double-click installer. |
 | `canopy_exploration_processor-<version>.tar.gz` | Source archive for developers. |
@@ -360,15 +360,15 @@ by this repository.
 `ci/sign_artifact.ps1` verifies configuration, Authenticode status, the expected
 certificate thumbprint and a timestamp. The builder signs only staged PowerShell
 copies before they enter the ZIP/source archive; it does not modify source files.
-Inno's signing tool signs the generated uninstaller and setup EXE through the same
-wrapper. Final checksums are generated afterward. Missing adapters, invalid
+The NSIS compile directives sign both generated setup and uninstaller executables
+through the same wrapper. Final checksums are generated afterward. Missing adapters, invalid
 signatures or wrong signers fail the build, rather than producing unsigned output.
 
 To exercise an approved signing setup locally, configure the adapter/certificate
 settings through the approved mechanism, then run:
 
 ```powershell
-.\installer\build_release.ps1 -CompileInstaller -SignRelease
+.\installer\build_release.ps1 -SignRelease
 ```
 
 Editing a signed file invalidates its signature. Changing the signing policy or
@@ -531,7 +531,7 @@ study load. The app does not make an immutable copy of the external workbook.
 
 ### Upgrade To A New Release
 
-1. Close every Canopy window and download a newer approved GitLab job artifact.
+1. Close every Canopy Exploration Processor window and download a newer approved GitLab job artifact.
 2. For EXE, run it against the same install folder. Existing user settings remain.
 3. For ZIP, the simplest approach is a new stable folder and fresh setup. Keep
    the old folder until the new version is accepted; settings are shared per user.
@@ -544,7 +544,7 @@ documentation and payload into the existing folder. Do not copy or replace
 
 Setup builds a candidate in `envs/release-<unique-id>`, validates it, then atomically
 changes `active.json` to select it. Failed installation leaves the current release
-selected. A deployment lock prevents concurrent setup changes. Running Canopy
+selected. A deployment lock prevents concurrent setup changes. Running the Canopy Exploration Processor
 blocks setup; processes are never forcibly killed. Old successful environments
 are retained until uninstall, which uses more disk space but permits recovery.
 
@@ -569,9 +569,9 @@ that workflow has been validated for users.
 
 ### Uninstall
 
-For EXE, close Canopy and use Windows Installed Apps or its Start Menu uninstaller.
-For ZIP, close Canopy and run `remove_environment.bat`, then delete the remaining
-extracted bundle if no longer needed. Removal refuses to proceed while Canopy is
+For EXE, close the Canopy Exploration Processor and use Windows Installed Apps or its Start Menu uninstaller.
+For ZIP, close the Canopy Exploration Processor and run `remove_environment.bat`, then delete the remaining
+extracted bundle if no longer needed. Removal refuses to proceed while the Canopy Exploration Processor is
 running. It preserves per-user preferences/logs, shared workbooks, studies and exports.
 
 Managed environment removal uses the bundled `cleanup.py` helper with a separate
@@ -599,7 +599,7 @@ approved corporate tooling interactively if IT needs detailed repository errors.
 | Symptom | Next Step |
 | --- | --- |
 | `uv` is not recognized | Use the corporate Python prompt or check approved Miniforge/Miniconda tooling. Build/setup also search the standard corporate locations. |
-| Inno compiler missing | Install approved Inno Setup 6, or build without `-CompileInstaller` for ZIP-only assets. |
+| NSIS setup EXE missing | Check that `CANOPY_COMPILE_INSTALLER` is enabled and the GitLab `windows-makensis` job succeeded. |
 | Access denied | Use a writable test/install folder and ask IT about permissions. Admin success does not establish normal-user readiness. |
 | Script blocked | Check `Get-ExecutionPolicy -List` and ask IT about signing/application-control policy. Do not bypass it. |
 | Repository/certificate failure | Reconnect to the corporate network and check approved authentication/CA configuration. Do not add trusted-host or insecure flags. |

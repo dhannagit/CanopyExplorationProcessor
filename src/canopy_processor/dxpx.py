@@ -1,6 +1,6 @@
-"""Read Canopy .dxpx files.
+"""Read Canopy simulation .dxpx files.
 
-Canopy files are MATLAB Level-5 MAT files with a different extension. The
+Canopy simulation files are MATLAB Level-5 MAT files with a different extension. The
 loader deliberately preserves the Header/Data split used by the MATLAB tools
 while converting MATLAB structs into ordinary Python mappings.
 """
@@ -16,12 +16,12 @@ from scipy.io import loadmat
 
 
 class DXPXLoadError(RuntimeError):
-    """Raised when a .dxpx file cannot be loaded as a Canopy result."""
+    """Raised when a .dxpx file cannot be loaded as a Canopy simulation result."""
 
 
 @dataclass(frozen=True)
 class DXPXRun:
-    """Normalized representation of one Canopy result file."""
+    """Normalized representation of one Canopy simulation result file."""
 
     path: Path
     header: dict[str, Any]
@@ -45,7 +45,7 @@ class DXPXRun:
 
 
 def load_dxpx(path: str | Path) -> DXPXRun:
-    """Load one Canopy ``.dxpx`` MAT file that contains a single lap.
+    """Load one Canopy simulation ``.dxpx`` MAT file that contains a single lap.
 
     Sweep run folders always hold exactly one lap; use load_dxpx_laps for
     baseline files, which may hold several.
@@ -60,7 +60,7 @@ def load_dxpx(path: str | Path) -> DXPXRun:
 
 
 def load_dxpx_laps(path: str | Path) -> list[DXPXRun]:
-    """Load a Canopy ``.dxpx`` MAT file that may hold one lap or an array of laps.
+    """Load a Canopy simulation ``.dxpx`` MAT file that may hold one lap or an array of laps.
 
     Baseline studies store multiple laps as a MATLAB struct array; sweep run
     files hold exactly one. Every returned :class:`DXPXRun` shares the same

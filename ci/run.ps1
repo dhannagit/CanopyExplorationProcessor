@@ -70,7 +70,12 @@ function Test-ArtifactChecksums([string]$Directory) {
 }
 
 function Test-InstalledBundle([string]$Archive, [string]$Version) {
-    $temporary = Join-Path ([IO.Path]::GetTempPath()) ('canopy-ci-smoke-' + [guid]::NewGuid().ToString('N'))
+    $smokeRoot = if ($env:CI -eq 'true') {
+    Join-Path $env:SystemDrive 'cs'
+    } else {
+    [IO.Path]::GetTempPath()
+    }
+    $temporary = Join-Path $smokeRoot ([guid]::NewGuid().ToString('N'))
     $install = Join-Path $temporary 'app'
     $oldLocalAppData = $env:LOCALAPPDATA
     $oldFindLinks = $env:UV_FIND_LINKS

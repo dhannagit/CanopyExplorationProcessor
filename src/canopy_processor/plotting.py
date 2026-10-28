@@ -1,4 +1,4 @@
-"""Render prepared Canopy plot data with Matplotlib."""
+"""Render prepared exploration plot data with Matplotlib."""
 
 from __future__ import annotations
 

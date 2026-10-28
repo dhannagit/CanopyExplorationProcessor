@@ -1,4 +1,4 @@
-"""Qt-facing application layer for the Canopy exploration processor."""
+"""Qt-facing application layer for the Canopy Exploration Processor."""
 
 from .session import AnalysisSession, SessionState
 from .discovery import DiscoveryResult, discover_dataset

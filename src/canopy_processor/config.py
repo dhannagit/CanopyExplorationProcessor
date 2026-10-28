@@ -1,4 +1,4 @@
-"""Serializable configuration for a Canopy exploration analysis."""
+"""Serializable configuration for an exploration analysis."""
 
 from __future__ import annotations
 
@@ -147,7 +147,7 @@ class ExportConfig:
 class AnalysisConfig:
 	"""Complete saved state for one exploration analysis."""
 
-	name: str = "Canopy Analysis"
+	name: str = "Exploration Analysis"
 	schema_version: int = 2
 	dataset: DatasetConfig | None = None
 	sweep_variables: list[SweepVariableConfig] = field(default_factory=list)

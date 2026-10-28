@@ -501,7 +501,7 @@ class MainWindow(QMainWindow):
 		dataset.setObjectName("datasetGroup")
 		dataset.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 		dataset_form = QFormLayout(dataset)
-		self.analysis_name = QLineEdit("Canopy Analysis")
+		self.analysis_name = QLineEdit("Exploration Analysis")
 		dataset_form.addRow("Analysis name:", self.analysis_name)
 		self.root_label = QLabel("No root selected")
 		self.root_label.setObjectName("muted")

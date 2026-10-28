@@ -1,4 +1,4 @@
-"""Generate turn-zone masks from the Canopy circuit workbook."""
+"""Generate turn-zone masks from the circuit workbook used by Canopy simulations."""
 
 from __future__ import annotations
 

@@ -118,7 +118,7 @@ $first = Read-State
 $global:running = $true
 Set-TestRelease '0.3.0'
 try { Install-Release $first; throw 'Running session did not block setup' } catch {
-    if ($_.Exception.Message -ne 'Close Canopy sessions before setup') { throw }
+    if ($_.Exception.Message -ne 'Close Canopy Exploration Processor sessions before setup') { throw }
 }
 Assert-True ((Read-State).current -eq $first.current) 'Active session was updated'
 try { Get-EnvironmentPath '..\other-app'; throw 'Traversal accepted' } catch {
@@ -162,7 +162,7 @@ $external = Join-Path $InstallDirectory 'team-data.txt'
 Set-Content -LiteralPath $external -Value 'keep'
 $global:running = $true
 try { Remove-Releases; throw 'Removed active installation' } catch {
-    if ($_.Exception.Message -ne 'Close Canopy before uninstalling') { throw }
+    if ($_.Exception.Message -ne 'Close Canopy Exploration Processor before uninstalling') { throw }
 }
 $global:running = $false
 Remove-Releases
@@ -226,23 +226,27 @@ Assert-True ((Read-State).current -eq $first.current) 'Invalid payload changed a
 """)
 
 
-def test_installer_bundles_application_and_removes_updater():
-    recipe = (SCRIPT.parent / "CanopyExplorationProcessor.iss").read_text()
-    assert 'Source: "cleanup.py"; DestDir: "{app}"' in recipe
-    assert 'Source: "{#MyPayloadDir}\\release.json"' in recipe
-    assert 'Source: "{#MyPayloadDir}\\canopy_exploration_processor-{#MyAppVersion}-py3-none-any.whl"' in recipe
-    assert 'OutputDir=..\\dist\\releases\\v{#MyAppVersion}' in recipe
-    assert 'Source: "CanopyExplorationUpdate.bat"' not in recipe
-    assert 'Name: "{group}\\Update Canopy Exploration Processor";' not in recipe
-    assert 'Type: files; Name: "{app}\\CanopyExplorationUpdate.bat"' in recipe
+def test_nsis_installer_bundles_application_and_uses_deployment_controller():
+    recipe = (SCRIPT.parent / "CanopyExplorationProcessor.nsi").read_text()
+    assert '!include "MUI2.nsh"' in recipe
+    assert 'File "$%CANOPY_BUNDLE_DIR%\\cleanup.py"' in recipe
+    assert 'File "$%CANOPY_BUNDLE_DIR%\\payload\\release.json"' in recipe
+    assert 'canopy_exploration_processor-${PRODUCT_VERSION}-py3-none-any.whl' in recipe
+    assert '-Mode Setup -ReleaseVersion "${PRODUCT_VERSION}"' in recipe
+    assert '-Mode Remove -InstallDirectory "$INSTDIR"' in recipe
+    assert 'RequestExecutionLevel user' in recipe
+    assert 'Section "Install Canopy Exploration Processor" SEC_CANOPY_EXPLORATION_PROCESSOR\n  Call CanopyExplorationProcessorCheckExistingInstall' in recipe
+    assert 'CanopyExplorationUpdate.bat' not in recipe
+    assert 'Inno Setup' not in recipe
 
 
 def test_release_builder_keeps_generated_files_outside_source():
     builder = (SCRIPT.parent / "build_release.ps1").read_text()
     assert 'Join-Path $PSScriptRoot \'payload\'' not in builder
     assert 'Join-Path $PSScriptRoot "output\\' not in builder
-    assert '"/DMyPayloadDir=$(Join-Path $bundle \'payload\')"' in builder
-    assert '"/O$assets"' in builder
+    assert "'.nsi'" in builder
+    assert 'ISCC.exe' not in builder
+    assert 'makensis.exe' not in builder
 
 
 def test_setup_rejects_mismatched_metadata_and_lock(tmp_path):

@@ -1,4 +1,4 @@
-"""Loose interactive scratchpad for exploring the Canopy processor package."""
+"""Loose interactive scratchpad for exploring the Canopy Exploration Processor package."""
 
 from pathlib import Path
 from dataclasses import replace
@@ -68,7 +68,7 @@ root.withdraw()
 try:
     raw_directory = filedialog.askdirectory(
         parent=root,
-        title="Select the raw directory containing Canopy exploration data",
+        title="Select the raw directory containing Canopy simulation exploration data",
     )
     if not raw_directory:
         raise RuntimeError("No raw directory selected.")

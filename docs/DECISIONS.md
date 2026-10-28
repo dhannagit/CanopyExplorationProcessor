@@ -18,13 +18,13 @@ Record decisions that affect the design or future maintenance. Use one entry per
 
 **Reason:** The sample file begins with the MATLAB 5.0 MAT signature and exposes the `D.Header` and `D.Data` structure used by the existing scripts.
 
-## ADR-003 - Prefer Canopy exploration metadata
+## ADR-003 - Prefer Canopy simulation exploration metadata
 
 **Status:** Accepted
 
 **Decision:** Use `exploration-map.json`, `scalar-inputs.csv`, and `scalar-inputs-metadata.csv` as the primary sweep-variable contract. Use `job-document.json` for provenance and fallback discovery.
 
-**Reason:** Aggregate Canopy metadata describes the factorial design, units, coordinates, and job ordering more reliably than inferring all behavior from string-matched JSON changes.
+**Reason:** Aggregate Canopy simulation metadata describes the factorial design, units, coordinates, and job ordering more reliably than inferring all behavior from string-matched JSON changes.
 
 ## ADR-004 - Treat post-processing as a distinct job type
 
@@ -32,7 +32,7 @@ Record decisions that affect the design or future maintenance. Use one entry per
 
 **Decision:** Detect the extra successful `Post Processor` job and exclude it from simulation-variable discovery and failure counts.
 
-**Reason:** Canopy creates one internal post-processing job without a corresponding `.dxpx`; this is expected behavior, not a failed simulation.
+**Reason:** The Canopy simulation software creates one internal post-processing job without a corresponding `.dxpx`; this is expected behavior, not a failed simulation.
 
 ## ADR-005 - Deploy through Artifactory with private Windows environments
 
@@ -54,7 +54,7 @@ termination, or in-place upgrades that can break the working installation.
 **Status:** Accepted
 
 **Decision:** File > Settings accepts a locally synced SharePoint/OneDrive folder
-containing `CircuitsData_Canopy_Hypercar.xlsx`. Persist it in Canopy-specific
+containing `CircuitsData_Canopy_Hypercar.xlsx`. Persist it in Canopy Exploration Processor-specific
 QSettings, outside the installation. Remove developer-checkout fallbacks. Allow
 startup without configuration, report unavailable resources when needed, and apply
 folder changes to subsequent study loads without rewriting loaded dataset paths.
@@ -103,15 +103,14 @@ do not assume public GitHub runners can reach internal dependency repositories.
 
 ## ADR-009 - Build standalone installers as GitLab job artifacts
 
-**Status:** Accepted for artifact-only integration; company toolchain approval pending.
+**Status:** Superseded by ADR-011.
 
 **Decision:** Add an opt-in protected-ref Windows pipeline with preflight, locked
 tests/JUnit reporting, and packaging followed by production-lock installation/Qt
 smoke validation. Store final artifacts under `dist/releases/v<version>` and upload
 only that directory to the package job. No Generic Package Registry, application
-updater or unverified shared-CI include is enabled. Keep the existing app layout,
-wheel/private-environment deployment and optional Inno build until company tooling
-selects an approved alternative. CI and EXE compilation start disabled.
+updater or unverified publishing job is enabled. Keep the existing app layout and
+wheel/private-environment deployment. CI and EXE compilation start disabled.
 
 Use the corporate template's Artifactory uv index/dev-group conventions, but keep
 the actual project's development `uv.lock` distinct from its embedded production
@@ -135,7 +134,7 @@ from protected-branch team previews and a blocking manual protected-tag producti
 job declaring `production/windows`. Set explicit artifact access and separate
 preview/production retention. Production requires owner approval and an explicit
 signing policy. Required signing uses an external runner-managed adapter, checks
-the signer/timestamp, signs staged scripts and Inno setup/uninstaller, and finishes
+the signer/timestamp, signs staged scripts and NSIS setup/uninstaller, and finishes
 checksums only afterward. Use the documented corporate Python runtime mirror.
 
 **Reason:** The runner tag does not imply installed workstation tooling. Corporate
@@ -143,6 +142,24 @@ rules treat artifacts usable outside the producing team as production deployment
 Neither documentation nor successful unsigned builds establish project approval,
 an artifact-retention exception, or access to a signing provider. CI remains
 disabled until these external contracts are supplied and validated.
+
+## ADR-011 - Compile Windows setup with the corporate NSIS job
+
+**Status:** Accepted; GitLab compile and signing validation pending.
+
+**Decision:** Use the shared `windows-makensis` job from the corporate CI project
+to compile `installer/CanopyExplorationProcessor.nsi`. The package job remains the
+source of the versioned Windows ZIP; the NSIS job extracts that bundle and emits
+`CanopyExplorationProcessor-<version>-Setup.exe` as an expiring job artifact. A
+protected-tag finalizer combines the EXE with package assets, recalculates hashes,
+and smoke-installs and uninstalls both formats. Keep the app's wheel/private-env
+deployment, explicit external signer adapter, and disabled-by-default CI policy.
+
+**Reason:** The corporate CI project already provides a Windows NSIS compiler job
+and artifact handling. Reusing it avoids introducing a local compiler dependency
+or an unsupported installer toolchain while keeping app-specific packaging and
+release checks reviewable in this repository. A successful local recipe review is
+not a substitute for the pending GitLab compile and protected signing run.
 
 ## Presentation Evidence To Capture
 

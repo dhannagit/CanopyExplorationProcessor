@@ -2,6 +2,26 @@
 
 This is the chronological engineering record for the Python migration. Keep entries concise and factual. Each entry should capture what changed, why it changed, how it was verified, and what comes next.
 
+## 2026-10-28 - Move Windows setup to the corporate NSIS job
+
+**Goal:** Replace the Inno Setup route with the corporate Windows NSIS compiler
+while retaining the bundled-wheel and private-environment deployment model.
+
+**Changed:** Added the NSIS installer recipe and wired the shared `windows-makensis`
+job to consume the package ZIP. Release finalization now requires both package and
+NSIS artifacts, refreshes checksums, and smoke-installs/uninstalls the EXE. Updated
+pipeline and installer tests, distribution instructions, and the current packaging
+decision. The NSIS recipe checks the selected install directory before replacing
+an existing installation and restores the registered directory for uninstall.
+
+**Evidence:** Focused CI/installer tests passed (19); the complete test suite passed
+(149). The local environment has no NSIS compiler, so the shared GitLab compile,
+artifact handoff, and protected signing run remain to be validated there.
+
+**Next:** Validate the pipeline with GitLab CI Lint, then run the protected Windows
+NSIS job and review its setup/uninstall smoke results. CI remains disabled by default;
+no Git operations were performed.
+
 ## 2026-10-28 - Harden managed environment cleanup
 
 **Goal:** Remove deeply nested Windows dependency trees without masking installation
@@ -117,7 +137,7 @@ Validate signing policy and normal-user installation on a teammate's device.
 
 **Changed:** Added the Python project metadata in `pyproject.toml`, a `src/canopy_processor` package, a native `.dxpx` loader, exploration metadata discovery, job-document classification, and initial tests.
 
-**Decisions:** Treat `.dxpx` files as MATLAB Level-5 MAT files; prefer Canopy's `exploration-map.json` and scalar input metadata for sweep definitions; preserve numeric run-folder alignment; classify the extra successful `Post Processor` job separately from simulation failures.
+**Decisions:** Treat `.dxpx` files as MATLAB Level-5 MAT files; prefer Canopy simulation's `exploration-map.json` and scalar input metadata for sweep definitions; preserve numeric run-folder alignment; classify the extra successful `Post Processor` job separately from simulation failures.
 
 **Evidence:** The sample `.dxpx` contains a top-level `D` struct with `Header` and `Data`; the sample has 26 numbered jobs, 25 simulation `.dxpx` files, and one post-processor job. The test suite passes with 6 tests.
 
@@ -258,7 +278,7 @@ Validate signing policy and normal-user installation on a teammate's device.
 
 **Goal:** Create the first visible PySide6 desktop shell so the planned GUI layout and visual direction can be reviewed before implementing the full analysis workflow.
 
-**Changed:** Added `src/canopy_processor/ui/session.py` with a framework-independent `AnalysisSession` lifecycle model covering discovery, review, ready, analysis, cancellation, results, and failure states while preserving the last valid result. Added `src/canopy_processor/ui/discovery.py` to resolve nested Canopy source folders, prefer exploration metadata, fall back to job-document variables, and return diagnostics. Added `src/canopy_processor/ui/main_window.py` with the initial dark graphite/cyan workbench: left control rail, dataset selection, sweep-variable area, metric/plot/baseline controls, Results and Comparison tabs, and persistent diagnostics/progress controls. Added `src/canopy_processor/ui/app.py` and the `canopy-exploration-gui` project script entry point.
+**Changed:** Added `src/canopy_processor/ui/session.py` with a framework-independent `AnalysisSession` lifecycle model covering discovery, review, ready, analysis, cancellation, results, and failure states while preserving the last valid result. Added `src/canopy_processor/ui/discovery.py` to resolve nested Canopy simulation source folders, prefer exploration metadata, fall back to job-document variables, and return diagnostics. Added `src/canopy_processor/ui/main_window.py` with the initial dark graphite/cyan workbench: left control rail, dataset selection, sweep-variable area, metric/plot/baseline controls, Results and Comparison tabs, and persistent diagnostics/progress controls. Added `src/canopy_processor/ui/app.py` and the Canopy Exploration Processor GUI entry points.
 
 **Decisions:** Keep the session and discovery contracts independent of Qt so the numerical and state behavior remains testable without constructing widgets. Treat the selected repository root as a container that may hold nested exploration directories. Keep the first shell intentionally non-destructive: selecting a root enters review state, while analysis controls report that the worker workflow is not connected yet.
 
@@ -340,7 +360,7 @@ Validate signing policy and normal-user installation on a teammate's device.
 
 ## 2026-08-27 - Match raw and DXPX study folders
 
-**Goal:** Make DXPX autodetection follow the production Canopy directory layout instead of stopping at the `DATA_dXpx` container.
+**Goal:** Make DXPX autodetection follow the production Canopy simulation directory layout instead of stopping at the `DATA_dXpx` container.
 
 **Changed:** Updated `ui/discovery.py` to identify the raw study directory under `DATA_Raw`, match its study name and worksheet parent against DXPX directories above their numbered run folders, and expose all matching DXPX candidates. Updated `main_window.py` to show the resolved raw and DXPX paths separately, enable a manual `Choose DXPX folder` override, and use the selected path for later loading. Added tests for the `DATA_Raw/02_Worksheets/WorksheetName/StudyName` to `DATA_dXpx/WorksheetName/StudyName` pairing and verified the existing sample now resolves to its study-level DXPX directory.
 

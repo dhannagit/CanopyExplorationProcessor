@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Preflight', 'Test', 'Package')]
+    [ValidateSet('Preflight', 'Test', 'Package', 'Finalize')]
     [string]$Phase = 'Preflight'
 )
 
@@ -121,6 +121,73 @@ function Test-InstalledBundle([string]$Archive, [string]$Version) {
     }
 }
 
+function Test-InstalledNsis([string]$Installer, [string]$Version, [string]$Python) {
+    $smokeRoot = if ($env:CI -eq 'true') { Join-Path $env:SystemDrive 'cs' } else { [IO.Path]::GetTempPath() }
+    $temporary = Join-Path $smokeRoot ([guid]::NewGuid().ToString('N'))
+    $install = Join-Path $temporary 'app'
+    $oldLocalAppData = $env:LOCALAPPDATA
+    $operationFailed = $false
+    try {
+        New-Item -ItemType Directory -Force -Path $install | Out-Null
+        $env:LOCALAPPDATA = Join-Path $temporary 'user'
+        $process = Start-Process -FilePath $Installer -ArgumentList @('/S', "/D=$install") -PassThru -Wait
+        if ($process.ExitCode -ne 0) { throw "NSIS setup failed (exit $($process.ExitCode))" }
+        $state = Join-Path $install 'active.json'
+        if (-not (Test-Path -LiteralPath $state)) { throw 'NSIS setup did not activate the installed application' }
+        $saved = Get-Content -LiteralPath $state -Raw | ConvertFrom-Json
+        if ($saved.version -ne $Version) { throw 'NSIS installed a different application version' }
+        $sentinel = Join-Path $install 'retain-this-user-file.txt'
+        Set-Content -LiteralPath $sentinel -Value 'preserve'
+        $uninstaller = Join-Path $install 'uninst.exe'
+        if (-not (Test-Path -LiteralPath $uninstaller)) { throw 'NSIS uninstaller was not created' }
+        $process = Start-Process -FilePath $uninstaller -ArgumentList '/S' -PassThru -Wait
+        if ($process.ExitCode -ne 0) { throw "NSIS uninstall failed (exit $($process.ExitCode))" }
+        if (Test-Path -LiteralPath $state) { throw 'NSIS uninstall left the application state behind' }
+        if (-not (Test-Path -LiteralPath $sentinel)) { throw 'NSIS uninstall deleted a file it did not install' }
+    } catch {
+        $operationFailed = $true
+        throw
+    } finally {
+        $env:LOCALAPPDATA = $oldLocalAppData
+        try {
+            $environmentDirectory = Join-Path $install 'envs'
+            if (Test-Path -LiteralPath $environmentDirectory) {
+                foreach ($environment in Get-ChildItem -LiteralPath $environmentDirectory -Directory) {
+                    if ($environment.Name -match '^release-[a-f0-9]{32}$') {
+                        & $Python -I (Join-Path $PSScriptRoot '..\installer\cleanup.py') `
+                            --install-directory $install --release-name $environment.Name
+                        if ($LASTEXITCODE -ne 0) { throw "Smoke cleanup failed for $($environment.Name)" }
+                    }
+                }
+            }
+            if (Test-Path -LiteralPath $temporary) {
+                Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction Stop
+            }
+        } catch {
+            if ($operationFailed) { Write-Warning "NSIS smoke cleanup also failed: $($_.Exception.Message)" }
+            else { throw }
+        }
+    }
+}
+
+function Finalize-Release([string]$ReleaseDirectory, [string]$Version, [string]$Python, [bool]$SignRelease) {
+    $executableName = "CanopyExplorationProcessor-$Version-Setup.exe"
+    $candidate = Join-Path $root "nsis_compile_files\$executableName"
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { throw 'NSIS job artifact is missing the expected setup executable' }
+    if ($SignRelease) {
+        & (Join-Path $PSScriptRoot 'sign_artifact.ps1') -Path $candidate -Kind Executable -VerifyOnly
+        if ($LASTEXITCODE -ne 0) { throw 'NSIS setup signature verification failed' }
+    }
+    Copy-Item -LiteralPath $candidate -Destination (Join-Path $ReleaseDirectory $executableName) -Force
+    $checksums = Get-ChildItem -LiteralPath $ReleaseDirectory -File | Where-Object Name -ne 'SHA256SUMS.txt' | Sort-Object Name | ForEach-Object {
+        (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $_.Name
+    }
+    $checksums | Set-Content -LiteralPath (Join-Path $ReleaseDirectory 'SHA256SUMS.txt') -Encoding ASCII
+    Test-ArtifactChecksums $ReleaseDirectory
+    Test-InstalledBundle (Join-Path $ReleaseDirectory "CanopyExplorationProcessor-$Version-Windows-x64.zip") $Version
+    Test-InstalledNsis (Join-Path $ReleaseDirectory $executableName) $Version $Python
+}
+
 if ($MyInvocation.InvocationName -eq '.') { return }
 
 $root = Split-Path $PSScriptRoot -Parent
@@ -149,14 +216,6 @@ try {
     $signRelease = Test-ProductionPolicy $buildKind $env:CI_COMMIT_TAG $env:CI_COMMIT_REF_PROTECTED $env:CANOPY_RELEASE_APPROVED $env:CANOPY_SIGNING_POLICY
     if ($signRelease) { & (Join-Path $PSScriptRoot 'sign_artifact.ps1') -CheckConfiguration }
     $compileInstaller = $env:CANOPY_COMPILE_INSTALLER -eq 'true'
-    if ($compileInstaller) {
-        $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-        $compilerFound = [bool]$compiler
-        foreach ($directory in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
-            if (Test-Path -LiteralPath (Join-Path $directory 'Inno Setup 6\ISCC.exe')) { $compilerFound = $true }
-        }
-        if (-not $compilerFound) { throw 'Provision approved Inno Setup 6 or disable CANOPY_COMPILE_INSTALLER' }
-    }
     New-Item -ItemType Directory -Force -Path reports | Out-Null
     switch ($Phase) {
         'Preflight' {
@@ -165,7 +224,7 @@ try {
                 "compile_installer=$compileInstaller", "full_tests=$($env:CANOPY_FULL_TESTS -eq 'true')",
                 "build_kind=$buildKind", "signing_required=$signRelease"
             ) | Set-Content -LiteralPath reports/ci-context.txt -Encoding UTF8
-            Write-Output 'Windows, uv, Python, tag/version and optional compiler preflight passed. Corporate index access is checked during dependency installation.'
+            Write-Output 'Windows, uv, Python, tag/version and release-policy preflight passed. Corporate index access is checked during dependency installation.'
         }
         'Test' {
             $env:QT_QPA_PLATFORM = 'offscreen'
@@ -177,18 +236,24 @@ try {
             if (-not $fullSuite) { Write-Warning 'Running fixture-independent tests only; full dataset/numerical parity is not validated by this job' }
             $arguments = @(Get-TestArguments $fullSuite) + @(
                 '-q', '--junitxml=reports/junit.xml', '--basetemp',
-                (Join-Path ([IO.Path]::GetTempPath()) ('canopy-ci-pytest-' + [guid]::NewGuid().ToString('N')))
+                (Join-Path ([IO.Path]::GetTempPath()) ('canopy-exploration-processor-ci-pytest-' + [guid]::NewGuid().ToString('N')))
             )
             & $testPython @arguments
             if ($LASTEXITCODE -ne 0) { throw 'CI test suite failed' }
         }
         'Package' {
-            & (Join-Path $root 'installer\build_release.ps1') -CompileInstaller:$compileInstaller -SignRelease:$signRelease
+            & (Join-Path $root 'installer\build_release.ps1') -SignRelease:$signRelease
             if ($LASTEXITCODE -ne 0) { throw 'CI release build failed' }
             $assets = Join-Path $root "dist\releases\v$version"
             Test-ArtifactChecksums $assets
             Test-InstalledBundle (Join-Path $assets "CanopyExplorationProcessor-$version-Windows-x64.zip") $version
             Write-Output "Verified release artifacts: $assets"
+        }
+        'Finalize' {
+            if (-not $compileInstaller) { throw 'NSIS installer compilation must be enabled before finalizing a release' }
+            $assets = Join-Path $root "dist\releases\v$version"
+            Finalize-Release $assets $version $python $signRelease
+            Write-Output "Verified NSIS release artifacts: $assets"
         }
     }
 } finally {

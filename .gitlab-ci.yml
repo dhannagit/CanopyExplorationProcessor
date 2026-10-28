@@ -39,6 +39,36 @@ default:
     - "$CANOPY_WINDOWS_RUNNER_TAG"
   timeout: 30 minutes
 
+  before_script:
+    - |
+      $ErrorActionPreference = 'Stop'
+      $basePython = 'C:\tools\miniforge3\python.exe'
+      $bootstrap = Join-Path $env:CI_PROJECT_DIR '.ci-bootstrap'
+
+      & $basePython -m venv $bootstrap
+      if ($LASTEXITCODE -ne 0) {
+        throw 'Could not create the CI bootstrap environment'
+      }
+
+      $bootstrapPython = Join-Path $bootstrap 'Scripts\python.exe'
+      & $bootstrapPython -m pip install --index-url https://artifactory.michelin.com/api/pypi/pypi/simple uv
+      if ($LASTEXITCODE -ne 0) {
+        throw 'Could not install uv from corporate Artifactory'
+      }
+
+      $env:PATH = "$(Join-Path $bootstrap 'Scripts');$env:PATH"
+
+      uv python install 3.13
+      if ($LASTEXITCODE -ne 0) {
+        throw 'Could not provision Python 3.13 through the configured mirror'
+      }
+
+      uv --version
+      uv python find --offline 3.13
+      if ($LASTEXITCODE -ne 0) {
+        throw 'Python 3.13 is not discoverable after installation'
+      }
+
 runner_preflight:
   stage: preflight
   script:

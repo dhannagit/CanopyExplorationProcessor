@@ -143,22 +143,22 @@ Neither documentation nor successful unsigned builds establish project approval,
 an artifact-retention exception, or access to a signing provider. CI remains
 disabled until these external contracts are supplied and validated.
 
-## ADR-011 - Compile Windows setup with the corporate NSIS job
+## ADR-011 - Compile Windows setup with the corporate NSIS image
 
 **Status:** Accepted; GitLab compile and signing validation pending.
 
-**Decision:** Use the shared `windows-makensis` job from the corporate CI project
+**Decision:** Use a local `nsis_compile` job on the approved corporate NSIS image
 to compile `installer/CanopyExplorationProcessor.nsi`. The package job remains the
-source of the versioned Windows ZIP; the NSIS job extracts that bundle and emits
+source of the versioned Windows ZIP; the compile job extracts that bundle and emits
 `CanopyExplorationProcessor-<version>-Setup.exe` as an expiring job artifact. A
 protected-tag finalizer combines the EXE with package assets, recalculates hashes,
 and smoke-installs and uninstalls both formats. Keep the app's wheel/private-env
 deployment, explicit external signer adapter, and disabled-by-default CI policy.
 
-**Reason:** The corporate CI project already provides a Windows NSIS compiler job
-and artifact handling. Reusing it avoids introducing a local compiler dependency
-or an unsupported installer toolchain while keeping app-specific packaging and
-release checks reviewable in this repository. A successful local recipe review is
+**Reason:** The corporate Windows image provides the approved NSIS compiler. A
+local ASCII-named job avoids coupling project configuration to a shared template's
+emoji-bearing job key while keeping the compiler, artifact handoff and release
+checks within the approved corporate runner. A successful local recipe review is
 not a substitute for the pending GitLab compile and protected signing run.
 
 ## Presentation Evidence To Capture

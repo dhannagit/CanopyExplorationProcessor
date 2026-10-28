@@ -127,8 +127,9 @@ Ask the runner/tooling owner to confirm:
    including the registry dependencies and build backend. Keep secrets in approved
    service/CI configuration, not the repository or index URL. Index URLs are recorded
    in release metadata and must not contain credentials.
-4. If EXE builds are approved, the included shared NSIS job is available to this
-   project and its compiler image and any required signing service are approved.
+4. If EXE builds are approved, the corporate NSIS compiler image
+   `docker.artifactory.michelin.com/rdxp/windows/build:1.0.0` and any required
+   signing service are approved.
 5. Artifact-only distribution, classification, audience and retention are explicitly
    approved. General company guidance uses Artifactory for binaries; it does not
    establish an exception for durable GitLab job-artifact delivery. Absence of an
@@ -220,8 +221,9 @@ The jobs run in this order:
    installed Qt/native-library smoke check and remove that test install. Protected
    default-branch artifacts are team previews; protected-tag packages are created
    only when installer compilation and release approval are enabled.
-4. `windows-makensis`: consume the package job's ZIP, extract its bundled wheel and
-   deployment scripts, compile the NSIS setup EXE, and retain it as a job artifact.
+4. `nsis_compile`: run in the corporate NSIS image, consume the package job's ZIP,
+   extract its bundled wheel and deployment scripts, compile the setup EXE, and
+   retain it as a job artifact.
    This stage exists only when `CANOPY_COMPILE_INSTALLER=true` and ref/policy rules
    allow it.
 5. `release_windows`: for matching protected version tags, an authorized operator
@@ -599,7 +601,7 @@ approved corporate tooling interactively if IT needs detailed repository errors.
 | Symptom | Next Step |
 | --- | --- |
 | `uv` is not recognized | Use the corporate Python prompt or check approved Miniforge/Miniconda tooling. Build/setup also search the standard corporate locations. |
-| NSIS setup EXE missing | Check that `CANOPY_COMPILE_INSTALLER` is enabled and the GitLab `windows-makensis` job succeeded. |
+| NSIS setup EXE missing | Check that `CANOPY_COMPILE_INSTALLER` is enabled and the GitLab `nsis_compile` job succeeded. |
 | Access denied | Use a writable test/install folder and ask IT about permissions. Admin success does not establish normal-user readiness. |
 | Script blocked | Check `Get-ExecutionPolicy -List` and ask IT about signing/application-control policy. Do not bypass it. |
 | Repository/certificate failure | Reconnect to the corporate network and check approved authentication/CA configuration. Do not add trusted-host or insecure flags. |

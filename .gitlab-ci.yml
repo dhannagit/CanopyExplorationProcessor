@@ -9,7 +9,6 @@ include:
   - project: dord/infra/central-ci-cd/ci-cd
     file:
       - global-settings.yml
-      - jobs-builder/win-makensis.yml
 
 variables:
   CANOPY_CI_ENABLED: "false"
@@ -155,15 +154,15 @@ package_windows:
     paths:
       - dist/releases/
 
-"windows-makensis 🧳":
+nsis_compile:
   stage: installer
+  image:
+    name: docker.artifactory.michelin.com/rdxp/windows/build:1.0.0
   needs:
     - job: package_windows
       artifacts: true
   variables:
     NSIS_FILE: "installer/CanopyExplorationProcessor.nsi"
-    NSIS_USE_SUBMODULE_PLUGIN: ""
-    NSIS_SIGN_BINARY: "false"
   before_script:
     - |
       $ErrorActionPreference = 'Stop'
@@ -188,10 +187,11 @@ package_windows:
       }
       $env:PRODUCT_VERSION = $manifest.version
       $env:CANOPY_BUNDLE_DIR = $bundle
-      $env:CANOPY_NSIS_OUTPUT = Join-Path $env:CI_PROJECT_DIR "CanopyExplorationProcessor-$($manifest.version)-Setup.exe"
+      $outputDirectory = Join-Path $env:CI_PROJECT_DIR 'nsis_compile_files'
+      New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
+      $env:CANOPY_NSIS_OUTPUT = Join-Path $outputDirectory "CanopyExplorationProcessor-$($manifest.version)-Setup.exe"
       $env:CANOPY_SIGNING_WRAPPER = Join-Path $env:CI_PROJECT_DIR 'ci\sign_artifact.ps1'
       $env:CANOPY_SIGN_RELEASE = 'false'
-      $env:NSIS_CMD_PARAMS = ''
       if ($env:CI_COMMIT_TAG) {
         if ($env:CANOPY_RELEASE_APPROVED -ne 'true' -or
             $env:CANOPY_SIGNING_POLICY -notin @('required', 'not-required')) {
@@ -200,11 +200,19 @@ package_windows:
         if ($env:CANOPY_SIGNING_POLICY -eq 'required') {
           & $env:CANOPY_SIGNING_WRAPPER -CheckConfiguration
           $env:CANOPY_SIGN_RELEASE = 'true'
-          $env:NSIS_CMD_PARAMS = '/DCANOPY_SIGN_RELEASE'
         }
       }
       Write-Output "NSIS source bundle: $bundle"
       Write-Output "NSIS output: $env:CANOPY_NSIS_OUTPUT"
+  script:
+    - |
+      $ErrorActionPreference = 'Stop'
+      $makensis = Get-Command makensis.exe -ErrorAction Stop
+      $arguments = @('/V4', "/DPRODUCT_VERSION=$env:PRODUCT_VERSION")
+      if ($env:CANOPY_SIGN_RELEASE -eq 'true') { $arguments += '/DCANOPY_SIGN_RELEASE' }
+      $arguments += $env:NSIS_FILE
+      & $makensis.Source @arguments
+      if ($LASTEXITCODE -ne 0) { throw 'NSIS compilation failed' }
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $CANOPY_COMPILE_INSTALLER == "true"'
       when: on_success
@@ -231,7 +239,7 @@ release_windows:
   needs:
     - job: package_windows
       artifacts: true
-    - job: "windows-makensis 🧳"
+    - job: nsis_compile
       artifacts: true
   environment:
     name: production/windows

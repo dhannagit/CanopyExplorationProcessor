@@ -7,8 +7,8 @@ This is the chronological engineering record for the Python migration. Keep entr
 **Goal:** Replace the Inno Setup route with the corporate Windows NSIS compiler
 while retaining the bundled-wheel and private-environment deployment model.
 
-**Changed:** Added the NSIS installer recipe and wired the shared `windows-makensis`
-job to consume the package ZIP. Release finalization now requires both package and
+**Changed:** Added the NSIS installer recipe and wired a local ASCII-named job on
+the corporate NSIS image to consume the package ZIP. Release finalization requires both package and
 NSIS artifacts, refreshes checksums, and smoke-installs/uninstalls the EXE. Updated
 pipeline and installer tests, distribution instructions, and the current packaging
 decision. The NSIS recipe checks the selected install directory before replacing

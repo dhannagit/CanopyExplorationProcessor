@@ -24,7 +24,10 @@ def test_public_commands_use_full_product_name():
 
 
 def test_pipeline_is_opt_in_protected_and_artifact_only():
-    pipeline = yaml.safe_load((ROOT / ".gitlab-ci.yml").read_text())
+    pipeline_path = ROOT / ".gitlab-ci.yml"
+    pipeline_bytes = pipeline_path.read_bytes()
+    assert all(byte < 128 for byte in pipeline_bytes)
+    pipeline = yaml.safe_load(pipeline_bytes.decode("ascii"))
     assert pipeline["variables"]["CANOPY_CI_ENABLED"] == "false"
     assert pipeline["variables"]["CANOPY_COMPILE_INSTALLER"] == "false"
     assert pipeline["workflow"]["rules"][0]["when"] == "never"
@@ -42,16 +45,19 @@ def test_pipeline_is_opt_in_protected_and_artifact_only():
     assert pipeline["release_windows"]["artifacts"]["access"] == "developer"
     assert pipeline["package_windows"]["artifacts"]["expire_in"] == "7 days"
     assert "environment" not in pipeline["package_windows"]
+    nsis_job = pipeline["nsis_compile"]
     assert [need["job"] for need in pipeline["release_windows"]["needs"]] == [
-        "package_windows", "windows-makensis 🧳"
+        "package_windows", "nsis_compile"
     ]
     assert pipeline["release_windows"]["rules"][0]["allow_failure"] is False
-    assert pipeline["include"][0]["file"] == [
-        "global-settings.yml", "jobs-builder/win-makensis.yml"
-    ]
+    assert pipeline["include"][0]["file"] == ["global-settings.yml"]
     assert pipeline["stages"].index("installer") < pipeline["stages"].index("release")
-    assert pipeline["windows-makensis 🧳"]["needs"][0]["job"] == "package_windows"
-    assert pipeline["windows-makensis 🧳"]["artifacts"]["paths"] == [
+    assert pipeline["stages"].index(nsis_job["stage"]) < pipeline["stages"].index("release")
+    assert nsis_job["image"]["name"] == "docker.artifactory.michelin.com/rdxp/windows/build:1.0.0"
+    assert nsis_job["needs"][0]["job"] == "package_windows"
+    assert nsis_job["script"]
+    assert "makensis.exe" in nsis_job["script"][0]
+    assert nsis_job["artifacts"]["paths"] == [
         "nsis_compile_files/*.exe"
     ]
     assert pipeline["package_windows"]["needs"][0]["job"] == "test_windows"

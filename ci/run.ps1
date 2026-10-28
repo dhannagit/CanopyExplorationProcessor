@@ -69,7 +69,7 @@ function Test-ArtifactChecksums([string]$Directory) {
     if (Compare-Object $names $actualNames) { throw 'Release checksum list is incomplete' }
 }
 
-ffunction Test-InstalledBundle([string]$Archive, [string]$Version) {
+function Test-InstalledBundle([string]$Archive, [string]$Version) {
     $temporary = Join-Path ([IO.Path]::GetTempPath()) ('canopy-ci-smoke-' + [guid]::NewGuid().ToString('N'))
     $install = Join-Path $temporary 'app'
     $oldLocalAppData = $env:LOCALAPPDATA

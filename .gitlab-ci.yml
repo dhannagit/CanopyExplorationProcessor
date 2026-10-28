@@ -43,12 +43,34 @@ runner_preflight:
   stage: preflight
   script:
     - |
-      Get-Command python.exe, conda.exe, uv.exe -ErrorAction SilentlyContinue |
-        Select-Object Name, Source
+      foreach ($profilePath in @(
+        $PROFILE.AllUsersAllHosts,
+        $PROFILE.CurrentUserAllHosts
+      )) {
+        if (Test-Path -LiteralPath $profilePath) {
+          Write-Output "Loading profile: $profilePath"
+          & $profilePath
+        }
+      }
 
-      if (Get-Command python.exe -ErrorAction SilentlyContinue) {
-        python.exe --version
-        python.exe -m pip --version
+      foreach ($name in @('python', 'conda', 'uv')) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue |
+          Select-Object -First 1
+
+        if ($command) {
+          Write-Output "$name FOUND: $($command.CommandType) $($command.Source)"
+        } else {
+          Write-Output "$name NOT FOUND"
+        }
+      }
+
+      if (Get-Command python -ErrorAction SilentlyContinue) {
+        python --version
+        python -m pip --version
+      }
+
+      if (Get-Command conda -ErrorAction SilentlyContinue) {
+        conda info --base
       }
     - powershell.exe -NoProfile -NonInteractive -File .\ci\run.ps1 -Phase Preflight
   artifacts:

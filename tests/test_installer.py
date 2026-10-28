@@ -229,8 +229,9 @@ Assert-True ((Read-State).current -eq $first.current) 'Invalid payload changed a
 def test_nsis_installer_bundles_application_and_uses_deployment_controller():
     recipe = (SCRIPT.parent / "CanopyExplorationProcessor.nsi").read_text()
     assert '!include "MUI2.nsh"' in recipe
-    assert 'File "$%CANOPY_BUNDLE_DIR%\\cleanup.py"' in recipe
-    assert 'File "$%CANOPY_BUNDLE_DIR%\\payload\\release.json"' in recipe
+    assert 'OutFile "${CANOPY_NSIS_OUTPUT}"' in recipe
+    assert 'File "${CANOPY_BUNDLE_DIR}\\cleanup.py"' in recipe
+    assert 'File "${CANOPY_BUNDLE_DIR}\\payload\\release.json"' in recipe
     assert 'canopy_exploration_processor-${PRODUCT_VERSION}-py3-none-any.whl' in recipe
     assert '-Mode Setup -ReleaseVersion "${PRODUCT_VERSION}"' in recipe
     assert '-Mode Remove -InstallDirectory "$INSTDIR"' in recipe

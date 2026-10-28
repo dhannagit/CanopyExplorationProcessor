@@ -18,7 +18,7 @@ Unicode true
 !define PRODUCT_VERSION_QUAD "${PRODUCT_VERSION}.0"
 
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
-OutFile "$%CANOPY_NSIS_OUTPUT%"
+OutFile "${CANOPY_NSIS_OUTPUT}"
 InstallDir "$LOCALAPPDATA\Canopy Exploration Processor"
 InstallDirRegKey HKCU "${PRODUCT_KEY}" "InstallLocation"
 RequestExecutionLevel user
@@ -74,15 +74,15 @@ FunctionEnd
 Section "Install Canopy Exploration Processor" SEC_CANOPY_EXPLORATION_PROCESSOR
   Call CanopyExplorationProcessorCheckExistingInstall
   SetOutPath "$INSTDIR"
-  File "$%CANOPY_BUNDLE_DIR%\deployment.ps1"
-  File "$%CANOPY_BUNDLE_DIR%\cleanup.py"
-  File "$%CANOPY_BUNDLE_DIR%\setup_environment.bat"
-  File "$%CANOPY_BUNDLE_DIR%\CanopyExplorationStart.bat"
-  File "$%CANOPY_BUNDLE_DIR%\remove_environment.bat"
+  File "${CANOPY_BUNDLE_DIR}\deployment.ps1"
+  File "${CANOPY_BUNDLE_DIR}\cleanup.py"
+  File "${CANOPY_BUNDLE_DIR}\setup_environment.bat"
+  File "${CANOPY_BUNDLE_DIR}\CanopyExplorationStart.bat"
+  File "${CANOPY_BUNDLE_DIR}\remove_environment.bat"
 
   SetOutPath "$INSTDIR\payload"
-  File "$%CANOPY_BUNDLE_DIR%\payload\release.json"
-  File "$%CANOPY_BUNDLE_DIR%\payload\canopy_exploration_processor-${PRODUCT_VERSION}-py3-none-any.whl"
+  File "${CANOPY_BUNDLE_DIR}\payload\release.json"
+  File "${CANOPY_BUNDLE_DIR}\payload\canopy_exploration_processor-${PRODUCT_VERSION}-py3-none-any.whl"
 
   StrCpy $0 1
   ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -File "$INSTDIR\deployment.ps1" -Mode Setup -ReleaseVersion "${PRODUCT_VERSION}" -InstallDirectory "$INSTDIR"' $0

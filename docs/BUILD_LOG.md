@@ -2,6 +2,28 @@
 
 This is the chronological engineering record for the Python migration. Keep entries concise and factual. Each entry should capture what changed, why it changed, how it was verified, and what comes next.
 
+## 2026-10-28 - Harden managed environment cleanup
+
+**Goal:** Remove deeply nested Windows dependency trees without masking installation
+errors or deleting resources outside app-owned environments.
+
+**Changed:** Added a bundled standard-library Python cleanup helper using Windows
+extended-length paths, read-only-file handling, exact managed-release identifiers,
+ancestor link/junction rejection and an external-interpreter check. Deployment uses
+it for failed candidates and uninstall, preserves primary errors and retains state
+when uninstall cleanup fails. ZIP, EXE and source archives include the helper;
+fixture-independent CI tests include its regressions. CI enablement/compilation
+variables and source-control state were not changed.
+
+**Evidence:** All 149 local tests passed, including deep paths over 260 characters,
+read-only and locked files, junction boundaries, unrelated data preservation and
+failed-cleanup error/state retention. Local Inno compilation succeeded; package
+checksums and fresh production-lock installation/Qt smoke/removal passed. This
+does not establish compiler availability in the company CI container.
+
+**Next:** User will review, commit, push, merge and run pipeline tests. Enable EXE
+compilation in project variables when ready to check the CI image's compiler.
+
 ## 2026-10-27 - Documentation-driven GitLab delivery controls
 
 **Goal:** Implement documented Windows-container and production-deployment controls

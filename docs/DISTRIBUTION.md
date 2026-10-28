@@ -574,6 +574,20 @@ For ZIP, close Canopy and run `remove_environment.bat`, then delete the remainin
 extracted bundle if no longer needed. Removal refuses to proceed while Canopy is
 running. It preserves per-user preferences/logs, shared workbooks, studies and exports.
 
+Managed environment removal uses the bundled `cleanup.py` helper with a separate
+Python 3.13 interpreter found by `uv python find --offline --system 3.13`. Keep the
+approved uv/runtime tools available for uninstall; cleanup does not download tools
+or run Python from the environment it is deleting. Windows extended-length paths
+handle deeply nested dependency files, and read-only files are handled within the
+managed tree. Installation/env-root junctions are rejected and nested junctions
+are not followed into external data.
+
+Locked files and permission failures remain errors rather than being ignored.
+Uninstall leaves state in place if environment removal fails so it can be retried.
+If failed-install cleanup also fails, the original install error is preserved and
+the cleanup error is reported as a warning. The short CI smoke root is retained;
+cleanup hardening is not a guarantee that every setup tool supports arbitrary paths.
+
 ## Troubleshooting
 
 Logs are in `%LOCALAPPDATA%\CanopyExplorationProcessor\logs`. `deployment.log` records

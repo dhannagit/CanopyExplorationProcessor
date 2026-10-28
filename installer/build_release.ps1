@@ -55,7 +55,7 @@ try {
     foreach ($file in @('DISTRIBUTION.md', 'DECISIONS.md', 'BUILD_LOG.md')) {
         Copy-Item -LiteralPath (Join-Path $root "docs\$file") -Destination (Join-Path $buildSource 'docs')
     }
-    Get-ChildItem -LiteralPath $PSScriptRoot -File | Where-Object Extension -In '.ps1', '.bat', '.iss' |
+    Get-ChildItem -LiteralPath $PSScriptRoot -File | Where-Object Extension -In '.ps1', '.bat', '.iss', '.py' |
         Copy-Item -Destination (Join-Path $buildSource 'installer')
     Copy-Item -Path (Join-Path $root 'ci\*.ps1') -Destination (Join-Path $buildSource 'ci')
     Get-ChildItem -Path (Join-Path $root 'tests\test_*.py') -File |
@@ -90,7 +90,7 @@ try {
     $bundleName = "CanopyExplorationProcessor-$version-Windows-x64"
     $bundle = Join-Path $staging $bundleName
     New-Item -ItemType Directory -Force -Path $bundle | Out-Null
-    foreach ($file in @('deployment.ps1', 'setup_environment.bat', 'CanopyExplorationStart.bat', 'remove_environment.bat')) {
+    foreach ($file in @('deployment.ps1', 'cleanup.py', 'setup_environment.bat', 'CanopyExplorationStart.bat', 'remove_environment.bat')) {
         Copy-Item -LiteralPath (Join-Path $buildSource "installer\$file") -Destination $bundle
     }
     Copy-Item -LiteralPath (Join-Path $root 'docs\DISTRIBUTION.md') -Destination $bundle

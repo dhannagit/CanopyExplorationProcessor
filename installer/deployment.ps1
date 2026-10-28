@@ -138,6 +138,7 @@ function Install-Release($CurrentState) {
     $candidate = Get-EnvironmentPath $name
     $python = Join-Path $candidate 'Scripts\python.exe'
     $activated = $false
+    $operationFailed = $false
     try {
         Invoke-Tool $uv @('venv', $candidate, '--python', '3.13') | Out-Null
         Invoke-Tool $uv @('pip', 'install', '--python', $python, '--no-index', '--no-deps', $wheel) | Out-Null
@@ -157,9 +158,20 @@ function Install-Release($CurrentState) {
         Write-State ([ordered]@{current = $name; previous = $previous; version = $version})
         $activated = $true
         Write-Log "Activated bundled release $version"
+    } catch {
+        $operationFailed = $true
+        throw
     } finally {
-        if (-not $activated -and (Test-Path -LiteralPath $candidate)) {
-            Remove-Item -LiteralPath $candidate -Recurse -Force
+        if (-not $activated) {
+            try {
+                Remove-ManagedEnvironment $name
+            } catch {
+                if ($operationFailed) {
+                    Write-Warning "Failed-install cleanup also failed: $($_.Exception.Message)"
+                } else {
+                    throw
+                }
+            }
         }
     }
 }
@@ -181,17 +193,29 @@ function Restore-PreviousRelease($State) {
     Write-Log "Rolled back to $version; launch does not check for updates"
 }
 
+function Remove-ManagedEnvironment([string]$Name) {
+    Get-EnvironmentPath $Name | Out-Null
+    $uv = Find-Uv
+    $cleanupPython = (Invoke-Tool $uv @('python', 'find', '--offline', '--system', '3.13')).Trim()
+    if (-not [IO.Path]::IsPathRooted($cleanupPython)) { throw 'Cleanup requires an external Python 3.13 interpreter' }
+    Invoke-Tool $cleanupPython @(
+        '-I', (Join-Path $PSScriptRoot 'cleanup.py'),
+        '--install-directory', $InstallDirectory, '--release-name', $Name
+    ) | Out-Null
+}
+
 function Remove-Releases {
     if (Test-RunningSession) { throw 'Close Canopy before uninstalling' }
     if (Test-Path -LiteralPath $EnvironmentDirectory) {
         foreach ($directory in Get-ChildItem -LiteralPath $EnvironmentDirectory -Directory) {
             if ($directory.Name -match '^release-[a-f0-9]{32}$') {
-                $path = Get-EnvironmentPath $directory.Name
-                Remove-Item -LiteralPath $path -Recurse -Force
+                Remove-ManagedEnvironment $directory.Name
             }
         }
     }
-    Remove-Item -LiteralPath $StatePath, "$StatePath.bak" -Force -ErrorAction SilentlyContinue
+    foreach ($path in @($StatePath, "$StatePath.bak")) {
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+    }
     Write-Log 'Removed application environments; user settings and data retained'
 }
 

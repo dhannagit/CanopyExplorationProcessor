@@ -57,6 +57,9 @@ def test_pipeline_is_opt_in_protected_and_artifact_only():
     assert nsis_job["needs"][0]["job"] == "package_windows"
     assert nsis_job["script"]
     assert "makensis.exe" in nsis_job["script"][0]
+    assert '"/DPRODUCT_VERSION=$env:PRODUCT_VERSION"' in nsis_job["script"][0]
+    assert '"/DCANOPY_BUNDLE_DIR=$env:CANOPY_BUNDLE_DIR"' in nsis_job["script"][0]
+    assert '"/DCANOPY_NSIS_OUTPUT=$env:CANOPY_NSIS_OUTPUT"' in nsis_job["script"][0]
     assert nsis_job["artifacts"]["paths"] == [
         "nsis_compile_files/*.exe"
     ]

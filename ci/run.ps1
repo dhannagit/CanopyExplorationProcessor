@@ -29,7 +29,7 @@ function Test-ProductionPolicy([string]$Kind, [string]$Tag, [string]$Protected, 
 function Get-TestArguments([bool]$FullSuite) {
     if ($FullSuite) { return @('-m', 'pytest') }
     return @(
-        '-m', 'pytest', 'tests/test_ci.py', 'tests/test_installer.py', 'tests/test_ui_settings.py',
+        '-m', 'pytest', 'tests/test_ci.py', 'tests/test_cleanup.py', 'tests/test_installer.py', 'tests/test_ui_settings.py',
         'tests/test_ui_discovery.py', 'tests/test_ui_main_window.py', 'tests/test_config.py',
         'tests/test_exporting.py', 'tests/test_plot_data.py', 'tests/test_plotting.py',
         'tests/test_ui_session.py', 'tests/test_ui_worker.py', '-k',

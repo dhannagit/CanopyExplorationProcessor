@@ -36,6 +36,14 @@ function Test-RunningSession { return $global:running }
 function Find-Uv { return 'fake-uv.exe' }
 function Invoke-Tool([string]$Executable, [string[]]$ToolArguments, [int]$TimeoutSeconds = 180) {
     $global:toolCalls += ,$ToolArguments
+    if ($ToolArguments[0] -eq 'python' -and $ToolArguments[1] -eq 'find') {
+        return $env:CANOPY_TEST_PYTHON
+    }
+    if ($ToolArguments[0] -eq '-I') {
+        & $env:CANOPY_TEST_PYTHON @ToolArguments
+        if ($LASTEXITCODE -ne 0) { throw 'Managed cleanup failed' }
+        return
+    }
     if ($ToolArguments[0] -eq 'venv') {
         $directory = $ToolArguments[1]
         New-Item -ItemType Directory -Path (Join-Path $directory 'Scripts') -Force | Out-Null
@@ -220,6 +228,7 @@ Assert-True ((Read-State).current -eq $first.current) 'Invalid payload changed a
 
 def test_installer_bundles_application_and_removes_updater():
     recipe = (SCRIPT.parent / "CanopyExplorationProcessor.iss").read_text()
+    assert 'Source: "cleanup.py"; DestDir: "{app}"' in recipe
     assert 'Source: "{#MyPayloadDir}\\release.json"' in recipe
     assert 'Source: "{#MyPayloadDir}\\canopy_exploration_processor-{#MyAppVersion}-py3-none-any.whl"' in recipe
     assert 'OutputDir=..\\dist\\releases\\v{#MyAppVersion}' in recipe
@@ -255,4 +264,31 @@ try { Install-Release $first; throw 'Wrong lock checksum accepted' } catch {
 }
 Assert-True ((Read-State).current -eq $first.current) 'Mismatch changed active environment'
 Assert-True (@(Get-ChildItem $EnvironmentDirectory -Directory).Count -eq 1) 'Mismatch leaked candidate environment'
+""")
+
+
+def test_failed_cleanup_preserves_original_install_error_and_active_state(tmp_path):
+    run_powershell(tmp_path, BOOTSTRAP + r"""
+Install-Release $null
+$first = Read-State
+Set-TestRelease '0.3.0'
+$global:failSmoke = $true
+function Remove-ManagedEnvironment([string]$Name) { throw 'simulated locked candidate' }
+try { Install-Release $first; throw 'Failed install accepted' } catch {
+    if ($_.Exception.Message -ne 'simulated Qt failure') { throw }
+}
+Assert-True ((Read-State).current -eq $first.current) 'Failed cleanup changed active release'
+""")
+
+
+def test_uninstall_cleanup_failure_keeps_state_for_retry(tmp_path):
+    run_powershell(tmp_path, BOOTSTRAP + r"""
+Install-Release $null
+$first = Read-State
+function Remove-ManagedEnvironment([string]$Name) { throw 'simulated locked environment' }
+try { Remove-Releases; throw 'Failed removal accepted' } catch {
+    if ($_.Exception.Message -ne 'simulated locked environment') { throw }
+}
+Assert-True (Test-Path -LiteralPath $StatePath) 'Uninstall failure removed active state'
+Assert-True ((Read-State).current -eq $first.current) 'Uninstall failure changed active state'
 """)

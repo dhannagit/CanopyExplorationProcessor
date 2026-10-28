@@ -30,6 +30,7 @@ SignedUninstaller=yes
 
 [Files]
 Source: "deployment.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "cleanup.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "setup_environment.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "CanopyExplorationStart.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "remove_environment.bat"; DestDir: "{app}"; Flags: ignoreversion

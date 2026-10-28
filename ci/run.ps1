@@ -71,22 +71,48 @@ function Test-ArtifactChecksums([string]$Directory) {
 
 function Test-InstalledBundle([string]$Archive, [string]$Version) {
     $temporary = Join-Path ([IO.Path]::GetTempPath()) ('canopy-ci-smoke-' + [guid]::NewGuid().ToString('N'))
+    $install = Join-Path $temporary 'app'
     $oldLocalAppData = $env:LOCALAPPDATA
     $oldFindLinks = $env:UV_FIND_LINKS
+    $operationFailed = $false
+
     try {
         $env:LOCALAPPDATA = Join-Path $temporary 'user'
         $env:UV_FIND_LINKS = $null
         Expand-Archive -LiteralPath $Archive -DestinationPath $temporary
         $bundle = Join-Path $temporary "CanopyExplorationProcessor-$Version-Windows-x64"
-        & (Join-Path $bundle 'deployment.ps1') -Mode Setup
-        if ($LASTEXITCODE -ne 0) { throw 'Installed-bundle dependency/Qt smoke check failed' }
-        if (-not (Test-Path -LiteralPath (Join-Path $bundle 'active.json'))) { throw 'Smoke installation was not activated' }
-        & (Join-Path $bundle 'deployment.ps1') -Mode Remove
-        if ($LASTEXITCODE -ne 0) { throw 'Smoke installation removal failed' }
+
+        & (Join-Path $bundle 'deployment.ps1') -Mode Setup -InstallDirectory $install
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Installed-bundle dependency/Qt smoke check failed'
+        }
+
+        if (-not (Test-Path -LiteralPath (Join-Path $install 'active.json'))) {
+            throw 'Smoke installation was not activated'
+        }
+
+        & (Join-Path $bundle 'deployment.ps1') -Mode Remove -InstallDirectory $install
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Smoke installation removal failed'
+        }
+    } catch {
+        $operationFailed = $true
+        throw
     } finally {
         $env:LOCALAPPDATA = $oldLocalAppData
         $env:UV_FIND_LINKS = $oldFindLinks
-        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force }
+
+        try {
+            if (Test-Path -LiteralPath $temporary) {
+                Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction Stop
+            }
+        } catch {
+            if ($operationFailed) {
+                Write-Warning "Temporary-folder cleanup also failed: $($_.Exception.Message)"
+            } else {
+                throw
+            }
+        }
     }
 }
 

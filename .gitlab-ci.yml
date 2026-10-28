@@ -42,6 +42,14 @@ default:
 runner_preflight:
   stage: preflight
   script:
+    - |
+      Get-Command python.exe, conda.exe, uv.exe -ErrorAction SilentlyContinue |
+        Select-Object Name, Source
+
+      if (Get-Command python.exe -ErrorAction SilentlyContinue) {
+        python.exe --version
+        python.exe -m pip --version
+      }
     - powershell.exe -NoProfile -NonInteractive -File .\ci\run.ps1 -Phase Preflight
   artifacts:
     access: developer

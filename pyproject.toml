@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "canopy-exploration-processor"
-version = "0.1.0"
+version = "0.1.1"
 description = "Canopy Exploration Processor for analyzing Canopy simulation sweeps."
 readme = "README.md"
 requires-python = ">=3.13"

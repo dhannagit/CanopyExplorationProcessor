@@ -202,10 +202,13 @@ obtain an approved safe access path before enabling this feature.
 
 Use GitLab's CI editor/CI Lint to validate the configuration on your company instance.
 This YAML has been parsed/tested locally, not remotely linted or run on your GitLab.
-With CI enabled, an approved image and a protected default branch, run a pipeline through
-**Build > Pipelines > New pipeline** (the exact label can vary). Subsequent pushes
-to that branch and protected `v<version>` tags also create pipelines. Enable
-same-project MR pipelines separately only after their credential/access review.
+With CI enabled, an approved image and a protected default branch, product-relevant
+pushes to that branch create pipelines. README/docs-only pushes are skipped.
+Protected same-project MR pipelines remain optional and run only when the MR changes
+product/build paths and `CANOPY_MR_VALIDATION_ENABLED=true`. Protected version tags
+always create a pipeline regardless of changed paths. You can manually start a
+pipeline through **Build > Pipelines > New pipeline** for an explicit full check;
+manual web pipelines are not change-filtered.
 
 The jobs run in this order:
 

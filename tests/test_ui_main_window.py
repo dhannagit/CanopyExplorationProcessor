@@ -438,6 +438,9 @@ def test_open_reloads_override_and_restores_track_safely(monkeypatch, tmp_path: 
 		assert tuple(window.figure_canvas.figure.get_size_inches()) == original_size
 		assert (tmp_path / "exports/study.svg").is_file()
 		assert (tmp_path / "exports/study.png").is_file()
+		exported_svg = (tmp_path / "exports/study.svg").read_text(encoding="utf-8")
+		assert "isApex" in exported_svg
+		assert "isTurnZone1" in exported_svg
 	window.close()
 	application.processEvents()
 

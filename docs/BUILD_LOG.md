@@ -662,6 +662,30 @@ has been published and no production installation was modified.
 
 **Next:** Manually review the available export presets with representative heatmaps and faceted plots.
 
+## 2026-10-29 - Honor facet roles in suggested heatmaps
+
+**Goal:** Generate separate heatmaps for assigned facet dimensions when the plot choice is Suggested.
+
+**Root cause:** Suggested plot resolution selected a plain heatmap whenever x and y roles were present, ignoring facet roles. The plain heatmap builder then overlaid different facet combinations at matching x/y coordinates, leaving only one map.
+
+**Changed:** Suggested plots with x, y, and one or more facet roles now resolve to a faceted heatmap. Explicit plot choices and ordinary line/heatmap suggestions remain unchanged. Added regression coverage for two facet dimensions, distinct per-facet values, and role-based resolution.
+
+**Evidence:** The supplied Detroit toe/camber recipe loads 74 runs with no diagnostics and renders four heatmaps, one per front/rear toe combination. The generated preview was inspected; missing simulation cells remain blank. Full suite passes with 158 tests. Temporary previews and test directories were removed after verification.
+
+**Next:** Manually verify Suggested faceted rendering in the desktop app using the supplied recipe.
+
+## 2026-10-29 - Keep plot labels readable and show active filters
+
+**Goal:** Avoid overlapping coordinate labels without rounding their values and show applied phase/turn-zone filters on the plot.
+
+**Changed:** Added a shared draw-time layout engine for line/scatter, heatmap, faceted heatmap, and parallel-coordinate figures. It measures tick labels, rotates them where space permits, and reduces visible tick density only when necessary. Coordinate ticks and facet values use full-precision text; plotted data and existing cell-value annotation precision are unchanged. Faceted grids use a balanced arrangement, and titles wrap to their available width.
+
+**Decisions:** Filtered figures display the metric title plus phase/turn-zone selections and their within-category and between-category AND/OR operators. Unfiltered titles remain unchanged. The GUI and playground pass the applied filters, and export copies retain adaptive layout so new image dimensions do not reintroduce collisions or lose filter annotations.
+
+**Evidence:** Full suite passes with 171 tests. Renderer tests check collision-free labels after resizing across every plot family, full decimal coordinate text, filter categories/operators, and unchanged unfiltered titles. GUI export tests verify filter names in SVG output. The supplied 74-run Detroit study was rendered with an in-memory isApex filter and visually inspected at 1200x600; saved JSON and source data were not modified. Temporary previews and test directories were removed after verification.
+
+**Next:** Manually review dense labels and title wrapping at additional desktop sizes and export presets.
+
 ## Logging Checklist
 
 

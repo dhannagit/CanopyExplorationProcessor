@@ -77,6 +77,8 @@ def resolve_plot(plot: PlotConfig, variables: Iterable[SweepVariableConfig]) -> 
 	plot_type = plot.plot_type
 	if plot_type == "suggested":
 		plot_type = "heatmap" if "x" in roles and "y" in roles else "line"
+		if plot_type == "heatmap" and "facet" in roles:
+			plot_type = "faceted_heatmap"
 	return ResolvedPlot(
 		plot_type, roles.get("x"), roles.get("y"),
 		tuple(variable.path for variable in selected if variable.role == "facet"), roles.get("color"),

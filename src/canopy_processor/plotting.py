@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from typing import Any
+from textwrap import fill
 
 import numpy as np
 from matplotlib.figure import Figure
+from matplotlib.layout_engine import TightLayoutEngine
+from matplotlib.ticker import FuncFormatter
+
+from .config import FilterConfig
 
 from .plot_data import (
 	FacetedHeatmapData,
@@ -13,6 +18,81 @@ from .plot_data import (
 	LinePlotData,
 	ParallelCoordinatesData,
 )
+
+
+def _full_precision_tick(value: float, position: int | None = None) -> str:
+	return str(int(value)) if float(value).is_integer() else str(float(value))
+
+
+class ReadablePlotLayout(TightLayoutEngine):
+	"""Reflow tick labels and titles for each interactive or exported draw."""
+
+	def __init__(self) -> None:
+		super().__init__()
+		self._title_sources = {}
+
+	def execute(self, figure: Figure) -> None:
+		renderer = figure._get_renderer()
+		for _ in range(2):
+			for axis in figure.axes:
+				if axis.get_visible():
+					self._fit_ticks(axis, renderer)
+					self._wrap_title(axis.title, axis.bbox.width, renderer)
+			if figure._suptitle is not None:
+				self._wrap_title(figure._suptitle, figure.bbox.width * 0.94, renderer)
+			super().execute(figure)
+
+	@staticmethod
+	def _overlap(labels: list, renderer: Any) -> bool:
+		boxes = [label.get_window_extent(renderer) for label in labels if label.get_visible()]
+		return any(first.overlaps(second) for index, first in enumerate(boxes) for second in boxes[index + 1:])
+
+	def _fit_ticks(self, axis: Any, renderer: Any) -> None:
+		for tick in axis.xaxis.get_major_ticks():
+			tick.label1.set_visible(True)
+		axis.get_xticklabels()
+		lower, upper = sorted(axis.get_xlim())
+		labels = [
+			tick.label1 for tick in axis.xaxis.get_major_ticks()
+			if lower <= tick.get_loc() <= upper and tick.label1.get_text()
+		]
+		if not labels:
+			return
+		chosen_angle = 0
+		for angle in (0, 45, 90):
+			for label in labels:
+				label.set_rotation(angle)
+				label.set_horizontalalignment("right" if angle == 45 else "center")
+				label.set_rotation_mode("anchor")
+			if angle and max(label.get_window_extent(renderer).height for label in labels) > max(40, axis.bbox.height * 0.75):
+				continue
+			chosen_angle = angle
+			if not self._overlap(labels, renderer):
+				return
+		for label in labels:
+			label.set_rotation(chosen_angle)
+			label.set_horizontalalignment("right" if chosen_angle == 45 else "center")
+		for stride in range(2, len(labels) + 1):
+			for index, label in enumerate(labels):
+				label.set_visible(index % stride == 0)
+			if not self._overlap(labels, renderer):
+				break
+
+	def _wrap_title(self, title: Any, width: float, renderer: Any) -> None:
+		current = title.get_text()
+		source, previous = self._title_sources.get(title, (current, current))
+		if current != previous:
+			source = current
+		character_width = renderer.get_text_width_height_descent("M", title.get_fontproperties(), False)[0]
+		columns = max(8, int(width / max(1, character_width)))
+		wrapped = "\n".join(fill(line, width=columns) for line in source.split("\n"))
+		title.set_text(wrapped)
+		self._title_sources[title] = (source, wrapped)
+
+
+def _finish_layout(figure: Figure) -> None:
+	if not isinstance(figure.get_layout_engine(), ReadablePlotLayout):
+		figure.set_layout_engine(ReadablePlotLayout())
 
 
 def render_line(data: LinePlotData, *, scatter: bool = False) -> Figure:
@@ -27,8 +107,9 @@ def render_line(data: LinePlotData, *, scatter: bool = False) -> Figure:
 	axis.set_xlabel(data.x_variable)
 	axis.set_ylabel(data.y_label)
 	axis.set_title(data.y_label)
+	axis.xaxis.set_major_formatter(FuncFormatter(_full_precision_tick))
 	axis.grid(True, alpha=0.3)
-	figure.tight_layout()
+	_finish_layout(figure)
 	return figure
 
 
@@ -47,13 +128,15 @@ def render_heatmap(data: HeatmapPlotData, *, annotate: bool = True) -> Figure:
 	)
 	axis.set_xticks(data.x_values)
 	axis.set_yticks(data.y_values)
+	axis.xaxis.set_major_formatter(FuncFormatter(_full_precision_tick))
+	axis.yaxis.set_major_formatter(FuncFormatter(_full_precision_tick))
 	if annotate:
 		_annotate_heatmap(axis, data)
 	axis.set_xlabel(data.x_variable)
 	axis.set_ylabel(data.y_variable)
 	axis.set_title(data.metric_name)
 	figure.colorbar(image, ax=axis, label=data.metric_name)
-	figure.tight_layout()
+	_finish_layout(figure)
 	return figure
 
 
@@ -62,7 +145,7 @@ def render_faceted_heatmap(data: FacetedHeatmapData, *, annotate: bool = True) -
 
 	if not data.facets:
 		raise ValueError("Cannot render an empty set of heatmap facets")
-	columns = min(3, len(data.facets))
+	columns = min(3, int(np.ceil(np.sqrt(len(data.facets)))))
 	rows = int(np.ceil(len(data.facets) / columns))
 	figure, axes = _make_subplots(rows, columns)
 	axes = np.asarray(axes, dtype=object).reshape(-1)
@@ -77,9 +160,11 @@ def render_faceted_heatmap(data: FacetedHeatmapData, *, annotate: bool = True) -
 		)
 		axis.set_xticks(facet.x_values)
 		axis.set_yticks(facet.y_values)
+		axis.xaxis.set_major_formatter(FuncFormatter(_full_precision_tick))
+		axis.yaxis.set_major_formatter(FuncFormatter(_full_precision_tick))
 		if annotate:
 			_annotate_heatmap(axis, facet)
-		label = " | ".join(f"{name}={value:g}" for name, value in zip(data.facet_variables, key))
+		label = " | ".join(f"{name}={_full_precision_tick(value)}" for name, value in zip(data.facet_variables, key))
 		axis.set_title(label)
 		axis.set_xlabel(facet.x_variable)
 		axis.set_ylabel(facet.y_variable)
@@ -87,7 +172,7 @@ def render_faceted_heatmap(data: FacetedHeatmapData, *, annotate: bool = True) -
 	for axis in axes[len(data.facets):]:
 		axis.set_visible(False)
 	figure.suptitle(data.base.metric_name)
-	figure.tight_layout()
+	_finish_layout(figure)
 	return figure
 
 
@@ -110,13 +195,14 @@ def render_parallel_coordinates(data: ParallelCoordinatesData) -> Figure:
 	axis.set_ylabel(data.metric_name)
 	axis.set_title("Parallel Coordinates")
 	axis.grid(True, axis="y", alpha=0.3)
-	figure.tight_layout()
+	_finish_layout(figure)
 	return figure
 
 
 def render_plot_data(
 	data: Any, *, scatter: bool = False, annotate: bool = True,
 	labels: dict[str, str] | None = None,
+	filters: FilterConfig | None = None,
 ) -> Figure:
 	"""Dispatch to the renderer matching a plot-data dataclass."""
 
@@ -141,7 +227,20 @@ def render_plot_data(
 				for path in sorted(labels, key=len, reverse=True):
 					title = title.replace(f"{path}=", f"{labels[path]}=")
 				axis.set_title(title)
-		figure.tight_layout()
+	if filters and (filters.phases or filters.turn_zones):
+		parts = []
+		if filters.phases:
+			parts.append("Phases: (" + f" {filters.phase_operator.upper()} ".join(filters.phases) + ")")
+		if filters.turn_zones:
+			parts.append("Turn zones: (" + f" {filters.turn_zone_operator.upper()} ".join(filters.turn_zones) + ")")
+		summary = f" {filters.category_operator.upper()} ".join(parts)
+		if figure._suptitle is not None:
+			title = figure._suptitle.get_text()
+		else:
+			title = figure.axes[0].get_title()
+			figure.axes[0].set_title("")
+		figure.suptitle(f"{title}\nFilters: {summary}")
+	_finish_layout(figure)
 	return figure
 
 

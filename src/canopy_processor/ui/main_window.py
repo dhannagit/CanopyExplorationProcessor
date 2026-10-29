@@ -1162,7 +1162,7 @@ class MainWindow(QMainWindow):
 		}
 		figure = render_plot_data(
 			output.plot_data, scatter=config.plot.plot_type == "scatter",
-			annotate=config.plot.annotate, labels=labels,
+			annotate=config.plot.annotate, labels=labels, filters=config.filters,
 		)
 		previous_canvas = self.figure_canvas
 		self.figure_canvas = FigureCanvasQTAgg(figure)

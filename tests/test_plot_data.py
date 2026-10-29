@@ -5,12 +5,15 @@ from canopy_processor import (
 	AnalysisRow,
 	GridResult,
 	MetricResult,
+	PlotConfig,
+	SweepVariableConfig,
 	build_faceted_heatmap_data,
 	build_grid,
 	build_heatmap_data,
 	build_line_data,
 	build_parallel_coordinates_data,
 )
+from canopy_processor.plot_data import FacetedHeatmapData, build_plot_data, resolve_plot
 
 
 def _row(index: int, x: float, y: float, value: float, facet: float = 0.0) -> AnalysisRow:
@@ -77,3 +80,40 @@ def test_plot_data_requires_axes() -> None:
 
 	with pytest.raises(ValueError, match="x_variable"):
 		build_line_data(grid.points, None)
+
+
+def test_suggested_heatmap_preserves_multiple_facet_dimensions() -> None:
+	variables = [
+		SweepVariableConfig("front_toe", role="facet"),
+		SweepVariableConfig("rear_toe", role="facet"),
+		SweepVariableConfig("front_camber", role="x"),
+		SweepVariableConfig("rear_camber", role="y"),
+	]
+	rows = [
+		AnalysisRow(index, {
+			"front_toe": front_toe, "rear_toe": rear_toe,
+			"front_camber": -0.05, "rear_camber": -0.06,
+		}, MetricResult("grip", float(index), "mean", 10, 10))
+		for index, (front_toe, rear_toe) in enumerate(((0.001, -0.003), (0.001, -0.001), (0.003, -0.003), (0.003, -0.001)))
+	]
+	plot = PlotConfig("suggested")
+	resolved = resolve_plot(plot, variables)
+	assert resolved.plot_type == "faceted_heatmap"
+	assert plot.plot_type == "suggested"
+	data = build_plot_data(build_grid(rows), resolved)
+	assert isinstance(data, FacetedHeatmapData)
+	assert data.facet_variables == ("front_toe", "rear_toe")
+	assert set(data.facets) == {(0.001, -0.003), (0.001, -0.001), (0.003, -0.003), (0.003, -0.001)}
+	for index, key in enumerate(sorted(data.facets)):
+		assert data.facets[key].values[0, 0] == float(index)
+
+
+@pytest.mark.parametrize("plot_type,roles,expected", [
+	("suggested", ("x",), "line"),
+	("suggested", ("x", "y"), "heatmap"),
+	("suggested", ("x", "y", "facet"), "faceted_heatmap"),
+	("heatmap", ("x", "y", "facet"), "heatmap"),
+])
+def test_plot_resolution_respects_roles_and_explicit_choice(plot_type: str, roles: tuple[str, ...], expected: str) -> None:
+	variables = [SweepVariableConfig(f"variable_{index}", role=role) for index, role in enumerate(roles)]
+	assert resolve_plot(PlotConfig(plot_type), variables).plot_type == expected

@@ -250,6 +250,7 @@ try:
         output.plot_data,
         scatter=config.plot.plot_type == "scatter",
         annotate=config.plot.annotate,
+        filters=config.filters,
         labels={variable.path: variable.label for variable in config.sweep_variables},
     )
     plot_window = tk.Toplevel(root)

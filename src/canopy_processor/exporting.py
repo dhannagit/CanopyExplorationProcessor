@@ -42,7 +42,11 @@ def export_analysis(
 		else:
 			height = width / ratio
 		export_figure.set_size_inches(width, height, forward=False)
-		export_figure.tight_layout()
+		layout = export_figure.get_layout_engine()
+		if layout is not None:
+			layout.execute(export_figure)
+		else:
+			export_figure.tight_layout()
 
 	paths: list[Path] = []
 	for export_format in config.export.formats:

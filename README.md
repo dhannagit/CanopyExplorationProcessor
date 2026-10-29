@@ -4,20 +4,105 @@ Windows workbench for analyzing Canopy simulation sweeps.
 
 ## Install
 
-Download the Windows setup ZIP or EXE from an approved GitLab **release_windows**
-job's artifacts. **package_windows** outputs are team previews, not production
-downloads. Ask the maintainer for the approved pipeline/job link.
-Corporate Windows x64 devices need approved `uv` tooling, Python 3.13 and network
-access to corporate Artifactory during setup. The app wheel is bundled with the
-release; third-party dependencies come from Artifactory. No company updater or
-Artifactory publication of this application is required.
+### 1. Prepare Your Computer
 
-For ZIP, extract into a stable writable folder, run `setup_environment.bat`, then
-`CanopyExplorationStart.bat`. For EXE, run setup and use the Start Menu shortcut.
-Open **File > Settings** to select the synced folder containing the circuit workbook.
-This is optional for basic analysis: leave it unconfigured if you are not preparing
-turn-zone filters.
-Updates are manual: download and install a newer approved job artifact.
+Use a corporate Windows x64 computer connected to the corporate network or VPN.
+Setup needs approved `uv` tooling and access to corporate Artifactory to install
+Python 3.13 and the application's dependencies. An existing Python 3.11 installation
+is not sufficient by itself. Ask your maintainer or IT if the approved tooling is
+not installed. No development checkout is needed to install the application.
+
+Before installing, configure PowerShell for your Windows user account using the
+following IT-approved command:
+
+1. Open the Windows **Start** menu, search for **Windows PowerShell**, and open it
+	normally. **Run as administrator is not required.** Use the same Windows account
+	that will install and run Canopy Exploration Processor.
+2. Enter this command and press **Enter**:
+
+	```powershell
+	Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+	```
+
+3. If asked to confirm the change, enter `Y` and press **Enter**.
+4. Check the effective policy:
+
+	```powershell
+	Get-ExecutionPolicy
+	```
+
+	It should report `RemoteSigned`. This setting persists for your user account;
+	you normally only need to configure it once. If it reports another policy,
+	the command is denied, or scripts remain blocked, contact IT. Do not bypass
+	an enforced corporate policy. Downloaded unsigned scripts can still be blocked
+	under `RemoteSigned`; send the exact error to your maintainer if this happens.
+
+### 2. Find The Approved Download In GitLab
+
+GitLab calls files saved by a completed build job **artifacts**. You want the
+artifacts from a successful **release_windows** job, not the repository's
+**Download source code** button.
+
+The easiest route is to ask the maintainer for a direct link to the approved
+`release_windows` job. If you have that link, open it and continue at step 5 below.
+Otherwise:
+
+1. Sign in to the Canopy Exploration Processor project in GitLab using your
+	corporate account.
+2. In the project's left sidebar, open **Build > Pipelines**. Depending on the
+	GitLab layout, **Pipelines** may also be available as a pinned sidebar item.
+3. Find the pipeline for the release version the maintainer has approved, such as
+	**v0.1.1**. Choose the version tag, not a feature branch or a `main` preview.
+	Click the pipeline number to open its list or graph of jobs.
+4. Find **release_windows** in the **release** stage and click its name. It must
+	have a **Passed** status. If it is manual, pending, skipped, or failed, ask the
+	maintainer for the completed release; do not start a deployment yourself.
+5. On the job page, find **Job artifacts** and select **Download** (sometimes shown
+	as **Download artifacts**). This downloads an outer ZIP containing the release
+	files. If only **Browse** is visible, use it to inspect the artifact contents
+	and locate the download controls.
+6. In Windows File Explorer, right-click the downloaded ZIP and choose
+	**Extract All...**. Open the extracted folder, then open
+	**dist > releases > v0.1.1**, replacing `v0.1.1` with the version you downloaded.
+7. Locate **CanopyExplorationProcessor-0.1.1-Setup.exe** for the recommended installer
+	or **CanopyExplorationProcessor-0.1.1-Windows-x64.zip** for the extracted-folder
+	installation. You only need one installation method. The `.whl`, `.tar.gz`,
+	release metadata, and checksum files are not double-click installers.
+
+Do not use `package_windows`, `nsis_compile`, or `nsis_smoke` artifacts for normal
+installation unless the maintainer explicitly invites you to test a preview.
+If the job or download is inaccessible or expired, ask the maintainer for access
+or a current approved download. GitLab project visibility alone does not guarantee
+permission to download release artifacts.
+
+### 3. Install And Launch
+
+**Recommended: EXE installer**
+
+1. Double-click the extracted `CanopyExplorationProcessor-<version>-Setup.exe`.
+2. Follow the setup wizard. Keep the default per-user installation folder unless
+	your maintainer or IT specifies another writable folder. Administrator rights
+	are not normally required.
+3. Wait for setup to finish successfully, then launch **Canopy Exploration
+	Processor** from the Windows Start menu.
+
+**Alternative: ZIP installation**
+
+1. Extract the inner `CanopyExplorationProcessor-<version>-Windows-x64.zip` as well;
+	extracting the outer GitLab artifact ZIP alone is not enough.
+2. Place the resulting application folder in a stable location where your user
+	account has write permission. Do not run setup directly inside the ZIP.
+3. Open that application folder and double-click `setup_environment.bat`. Keep
+	the window open until setup completes successfully.
+4. Double-click `CanopyExplorationStart.bat` to launch the application. Keep the
+	installed folder in the same location afterward.
+
+For either method, keep corporate network access available during setup. If setup
+fails, report the exact error rather than trying to launch a partial installation.
+Once open, use **File > Settings** to select the synced folder containing the
+circuit workbook if you need turn-zone preparation. Basic analysis can run without
+this setting. Updates are manual: download and install a newer approved release
+using the same process.
 
 See the [GitLab Artifact Guide](docs/DISTRIBUTION.md) for prerequisites, local
 builds, CI setup, artifact downloads, signing considerations, upgrades and rollback.

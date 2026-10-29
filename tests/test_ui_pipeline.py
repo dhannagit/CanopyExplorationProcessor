@@ -18,24 +18,17 @@ from canopy_processor.ui import discover_dataset, load_dataset
 from canopy_processor.ui.pipeline import LoadedDataset, analyze_loaded_dataset, prepare_turn_zones
 
 
-ROOT = Path(__file__).parents[1]
-RAW = ROOT / "DATA_Raw" / "MOS_COR_TyrePressureExploration"
-EXTERNAL_BASELINE = next((ROOT / "BaselineExample").rglob("*.dXpx"), None)
-requires_samples = pytest.mark.skipif(
-	not (ROOT / "DATA_dXpx").is_dir() or EXTERNAL_BASELINE is None,
-	reason="Local study and baseline sample data are not installed",
-)
-
-
-@requires_samples
-def test_analyze_loaded_pressure_dataset_builds_heatmap_data() -> None:
-	discovery = discover_dataset(RAW)
+@pytest.mark.local_data
+def test_analyze_loaded_exploration_builds_heatmap_data(sample_exploration) -> None:
+	discovery = discover_dataset(sample_exploration.raw_directory, sample_exploration.workbook)
 	loaded = load_dataset(discovery)
 	config = AnalysisConfig(
-		dataset=DatasetConfig(loaded.runs[0].path.parents[1], RAW, discovery.circuit_workbook),
+		dataset=DatasetConfig(
+			loaded.runs[0].path.parents[1], sample_exploration.raw_directory, discovery.circuit_workbook
+		),
 		sweep_variables=[
-			SweepVariableConfig(discovery.variables[0].path, units="bar", role="x"),
-			SweepVariableConfig(discovery.variables[1].path, units="bar", role="y"),
+			SweepVariableConfig(discovery.variables[0].path, units=discovery.variables[0].units, role="x"),
+			SweepVariableConfig(discovery.variables[1].path, units=discovery.variables[1].units, role="y"),
 		],
 		metric="gCarPotential",
 		plot=PlotConfig(plot_type="heatmap"),
@@ -44,17 +37,19 @@ def test_analyze_loaded_pressure_dataset_builds_heatmap_data() -> None:
 
 	output = analyze_loaded_dataset(loaded, config, discovery.variables)
 
-	assert len(output.rows) == 25
-	assert output.plot_data.values.shape == (5, 5)
+	assert len(output.rows) == len(loaded.runs)
+	assert output.plot_data.values.size > 0
 
 
-@requires_samples
-def test_analyze_loaded_dataset_compares_against_loaded_run() -> None:
-	discovery = discover_dataset(RAW)
+@pytest.mark.local_data
+def test_analyze_loaded_dataset_compares_against_loaded_run(sample_exploration) -> None:
+	discovery = discover_dataset(sample_exploration.raw_directory, sample_exploration.workbook)
 	loaded = load_dataset(discovery)
 	baseline_index = int(loaded.runs[0].path.parent.name)
 	config = AnalysisConfig(
-		dataset=DatasetConfig(loaded.runs[0].path.parents[1], RAW, discovery.circuit_workbook),
+		dataset=DatasetConfig(
+			loaded.runs[0].path.parents[1], sample_exploration.raw_directory, discovery.circuit_workbook
+		),
 		sweep_variables=[
 			SweepVariableConfig(discovery.variables[0].path, role="x"),
 			SweepVariableConfig(discovery.variables[1].path, role="y"),
@@ -66,16 +61,18 @@ def test_analyze_loaded_dataset_compares_against_loaded_run() -> None:
 
 	output = analyze_loaded_dataset(loaded, config, discovery.variables)
 
-	assert len(output.compared_rows) == len(output.rows) == 25
+	assert len(output.compared_rows) == len(output.rows) == len(loaded.runs)
 	assert output.compared_rows[0].baseline.value == output.rows[0].metric_result.value
 
 
-@requires_samples
-def test_analyze_loaded_dataset_compares_against_external_laps() -> None:
-	discovery = discover_dataset(RAW)
+@pytest.mark.local_data
+def test_analyze_loaded_dataset_compares_against_external_laps(sample_exploration, sample_baseline_dxpx) -> None:
+	discovery = discover_dataset(sample_exploration.raw_directory, sample_exploration.workbook)
 	loaded = load_dataset(discovery)
 	config = AnalysisConfig(
-		dataset=DatasetConfig(loaded.runs[0].path.parents[1], RAW, discovery.circuit_workbook),
+		dataset=DatasetConfig(
+			loaded.runs[0].path.parents[1], sample_exploration.raw_directory, discovery.circuit_workbook
+		),
 		sweep_variables=[
 			SweepVariableConfig(discovery.variables[0].path, role="x"),
 			SweepVariableConfig(discovery.variables[1].path, role="y"),
@@ -84,27 +81,29 @@ def test_analyze_loaded_dataset_compares_against_external_laps() -> None:
 		plot=PlotConfig(plot_type="heatmap"),
 		baseline=BaselineConfig(
 			mode="external_study",
-			external_path=EXTERNAL_BASELINE,
-			lap_indices=(0, 2),
+			external_path=sample_baseline_dxpx,
+			lap_indices=(0,),
 			delta_mode="percent",
 		),
 	)
 
 	output = analyze_loaded_dataset(loaded, config, discovery.variables)
 
-	assert len(output.compared_rows) == 25
-	assert output.compared_rows[0].baseline.lap_count == 2
+	assert len(output.compared_rows) == len(loaded.runs)
+	assert output.compared_rows[0].baseline.lap_count == 1
 	assert output.compared_rows[0].delta_mode == "percent"
 
 
-@requires_samples
-def test_external_baseline_turn_zones_require_confirmed_track() -> None:
-	discovery = discover_dataset(RAW, ROOT / "CircuitsData_Canopy_Hypercar.xlsx")
-	loaded = prepare_turn_zones(load_dataset(discovery), discovery.circuit_workbook, "CTMP")
+@pytest.mark.local_data
+def test_external_baseline_turn_zones_require_confirmed_track(sample_exploration, sample_baseline_dxpx) -> None:
+	discovery = discover_dataset(sample_exploration.raw_directory, sample_exploration.workbook)
+	loaded = prepare_turn_zones(
+		load_dataset(discovery), discovery.circuit_workbook, sample_exploration.track_name
+	)
 	config = AnalysisConfig(
 		dataset=DatasetConfig(
 			loaded.runs[0].path.parents[1],
-			RAW,
+			sample_exploration.raw_directory,
 			discovery.circuit_workbook,
 		),
 		sweep_variables=[
@@ -115,7 +114,7 @@ def test_external_baseline_turn_zones_require_confirmed_track() -> None:
 		filters=FilterConfig(turn_zones=("isTurnZone1",)),
 		baseline=BaselineConfig(
 			mode="external_study",
-			external_path=EXTERNAL_BASELINE,
+			external_path=sample_baseline_dxpx,
 			lap_indices=(0,),
 			delta_mode="absolute",
 		),

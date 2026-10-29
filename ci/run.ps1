@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Preflight', 'Test', 'Package', 'Finalize')]
+    [ValidateSet('Preflight', 'Test', 'Package', 'PreviewSmoke', 'Finalize')]
     [string]$Phase = 'Preflight'
 )
 
@@ -26,15 +26,8 @@ function Test-ProductionPolicy([string]$Kind, [string]$Tag, [string]$Protected, 
     return $SigningPolicy -eq 'required'
 }
 
-function Get-TestArguments([bool]$FullSuite) {
-    if ($FullSuite) { return @('-m', 'pytest') }
-    return @(
-        '-m', 'pytest', 'tests/test_ci.py', 'tests/test_cleanup.py', 'tests/test_installer.py', 'tests/test_ui_settings.py',
-        'tests/test_ui_discovery.py', 'tests/test_ui_main_window.py', 'tests/test_config.py',
-        'tests/test_exporting.py', 'tests/test_plot_data.py', 'tests/test_plotting.py',
-        'tests/test_ui_session.py', 'tests/test_ui_worker.py', '-k',
-        'not sample_sources and not track_temperature and not populates_discovered and not persists_multiple and not manual_dxpx'
-    )
+function Get-TestArguments {
+    return @('-m', 'pytest', '-m', 'not local_data')
 }
 
 function Get-CiUv {
@@ -221,7 +214,7 @@ try {
         'Preflight' {
             @(
                 "version=$version", "commit=$env:CI_COMMIT_SHA", "phase=$Phase",
-                "compile_installer=$compileInstaller", "full_tests=$($env:CANOPY_FULL_TESTS -eq 'true')",
+                "compile_installer=$compileInstaller", "local_data_tests_excluded=true",
                 "build_kind=$buildKind", "signing_required=$signRelease"
             ) | Set-Content -LiteralPath reports/ci-context.txt -Encoding UTF8
             Write-Output 'Windows, uv, Python, tag/version and release-policy preflight passed. Corporate index access is checked during dependency installation.'
@@ -232,9 +225,8 @@ try {
             & $uv sync --locked --extra gui --extra test --group dev --python $python
             if ($LASTEXITCODE -ne 0) { throw 'Locked CI dependency installation failed; check approved index authentication and certificates' }
             $testPython = Join-Path $env:UV_PROJECT_ENVIRONMENT 'Scripts\python.exe'
-            $fullSuite = $env:CANOPY_FULL_TESTS -eq 'true'
-            if (-not $fullSuite) { Write-Warning 'Running fixture-independent tests only; full dataset/numerical parity is not validated by this job' }
-            $arguments = @(Get-TestArguments $fullSuite) + @(
+            Write-Warning 'Running the complete synthetic/fixture-independent suite; local_data integration tests are excluded.'
+            $arguments = @(Get-TestArguments) + @(
                 '-q', '--junitxml=reports/junit.xml', '--basetemp',
                 (Join-Path ([IO.Path]::GetTempPath()) ('canopy-exploration-processor-ci-pytest-' + [guid]::NewGuid().ToString('N')))
             )
@@ -254,6 +246,13 @@ try {
             $assets = Join-Path $root "dist\releases\v$version"
             Finalize-Release $assets $version $python $signRelease
             Write-Output "Verified NSIS release artifacts: $assets"
+        }
+        'PreviewSmoke' {
+            if ($buildKind -ne 'preview') { throw 'NSIS preview smoke must not run as a production deployment' }
+            if (-not $compileInstaller) { throw 'NSIS installer compilation must be enabled before smoke testing' }
+            $assets = Join-Path $root "dist\releases\v$version"
+            Finalize-Release $assets $version $python $false
+            Write-Output "Verified NSIS preview artifacts: $assets"
         }
     }
 } finally {

@@ -25,11 +25,6 @@ from canopy_processor.dxpx import DXPXRun
 from canopy_processor.results import AnalysisRow
 
 
-REPOSITORY_ROOT = Path(__file__).parents[1]
-SAMPLE_DXPX = next((REPOSITORY_ROOT / "DATA_dXpx").rglob("*.dXpx"))
-BASELINE_DXPX = next((REPOSITORY_ROOT / "BaselineExample").rglob("*.dXpx"))
-
-
 def _fake_run(folder_index: int) -> DXPXRun:
 	path = Path(f"/dataset/{folder_index}/example.dXpx")
 	return DXPXRun(path=path, header={}, data={})
@@ -70,19 +65,19 @@ def test_join_sweep_variables_requires_matching_lengths() -> None:
 		join_sweep_variables([_fake_run(0)], [], [])
 
 
-def test_analyze_baseline_pools_multiple_laps() -> None:
-	laps = load_dxpx_laps(BASELINE_DXPX)[:2]
+def test_analyze_baseline_pools_multiple_laps(synthetic_multi_lap_dxpx: Path) -> None:
+	laps = load_dxpx_laps(synthetic_multi_lap_dxpx)
 	metric = default_metrics()["gCarPotential"]
 
 	result = analyze_baseline(laps, metric)
 
 	expected_samples = sum(np.asarray(metric.evaluate(lap)).size for lap in laps)
-	assert result.lap_count == 2
+	assert result.lap_count == 3
 	assert result.selected_samples == expected_samples
 
 
-def test_analyze_baseline_accepts_a_single_run() -> None:
-	run = load_dxpx(SAMPLE_DXPX)
+def test_analyze_baseline_accepts_a_single_run(synthetic_single_lap_dxpx: Path) -> None:
+	run = load_dxpx(synthetic_single_lap_dxpx)
 	metric = default_metrics()["gCarPotential"]
 
 	result = analyze_baseline(run, metric)
@@ -128,10 +123,12 @@ def test_resolve_baseline_laps_for_loaded_run() -> None:
 	assert resolved == [run]
 
 
-def test_resolve_baseline_laps_for_external_study_selects_lap_indices() -> None:
+def test_resolve_baseline_laps_for_external_study_selects_lap_indices(
+	synthetic_multi_lap_dxpx: Path,
+) -> None:
 	config = BaselineConfig(
 		mode="external_study",
-		external_path=BASELINE_DXPX,
+		external_path=synthetic_multi_lap_dxpx,
 		lap_indices=(0, 2),
 		delta_mode="absolute",
 	)
@@ -141,8 +138,10 @@ def test_resolve_baseline_laps_for_external_study_selects_lap_indices() -> None:
 	assert len(resolved) == 2
 
 
-def test_resolve_baseline_laps_requires_lap_indices_for_multi_lap_file() -> None:
-	config = BaselineConfig(mode="external_study", external_path=BASELINE_DXPX, delta_mode="absolute")
+def test_resolve_baseline_laps_requires_lap_indices_for_multi_lap_file(
+	synthetic_multi_lap_dxpx: Path,
+) -> None:
+	config = BaselineConfig(mode="external_study", external_path=synthetic_multi_lap_dxpx, delta_mode="absolute")
 
 	with pytest.raises(ValueError, match="lap_indices"):
 		resolve_baseline_laps(config)

@@ -1,19 +1,20 @@
 from pathlib import Path
 
+import pytest
+
 from canopy_processor.ui import discover_dataset
 
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
-SAMPLE_RAW_STUDY = REPOSITORY_ROOT / "DATA_Raw" / "MOS_COR_TyrePressureExploration"
-TRACK_TEMP_STUDY = REPOSITORY_ROOT / "DATA_Raw" / "MOS_COR_TrackTempSweep"
 
 
-def test_discover_dataset_finds_sample_sources() -> None:
-	result = discover_dataset(SAMPLE_RAW_STUDY, REPOSITORY_ROOT / "CircuitsData_Canopy_Hypercar.xlsx")
+@pytest.mark.local_data
+def test_discover_dataset_finds_sample_sources(sample_exploration) -> None:
+	result = discover_dataset(sample_exploration.raw_directory, sample_exploration.workbook)
 
-	assert result.dxpx_directory == REPOSITORY_ROOT / "DATA_dXpx" / "MOS_COR_TyrePressureExploration"
-	assert result.raw_directory == REPOSITORY_ROOT / "DATA_Raw" / "MOS_COR_TyrePressureExploration"
-	assert result.circuit_workbook == REPOSITORY_ROOT / "CircuitsData_Canopy_Hypercar.xlsx"
+	assert result.dxpx_directory == sample_exploration.dxpx_directory
+	assert result.raw_directory == sample_exploration.raw_directory
+	assert result.circuit_workbook == sample_exploration.workbook
 	assert result.variables
 	assert not any("No .dXpx" in item for item in result.diagnostics)
 	assert result.dxpx_candidates
@@ -56,12 +57,29 @@ def test_discovery_requires_explicit_circuit_workbook(tmp_path: Path) -> None:
 	assert not any("workbook" in item.lower() for item in result.diagnostics)
 
 
-def test_discover_track_temperature_variables() -> None:
-	result = discover_dataset(TRACK_TEMP_STUDY)
+def test_discover_star_design_variables(tmp_path: Path) -> None:
+	raw = tmp_path / "star-study"
+	raw.mkdir()
+	(raw / "exploration-map.json").write_text(
+		'{"designName":"Star","coordinates":[[20,2],[30,2.1],[40,2.2]],"jobNames":[]}',
+		encoding="utf-8",
+	)
+	(raw / "scalar-inputs-metadata.csv").write_text(
+		"fullName,units\ntrack.temperature,degC\ntyre.pressure,bar\n", encoding="utf-8"
+	)
+	(raw / "scalar-inputs.csv").write_text(
+		"track.temperature,tyre.pressure\n20,2\n30,2.1\n40,2.2\n", encoding="utf-8"
+	)
+	(raw / "0").mkdir()
+	(raw / "0" / "job-document.json").write_text(
+		'{"name":"Sweep 0","data":{"changes":[{"path":"track.temperature","value":20}]}}',
+		encoding="utf-8",
+	)
+	result = discover_dataset(raw)
 
 	assert result.exploration is not None
 	assert result.exploration.design_name == "Star"
-	assert len(result.variables) == 8
-	assert result.variables[0].path == "track.TTrack"
-	assert result.variables[0].values[:6] == (25.0, 30.0, 35.0, 40.0, 45.0, 50.0)
+	assert len(result.variables) == 2
+	assert result.variables[0].path == "track.temperature"
+	assert result.variables[0].values == (20.0, 30.0, 40.0)
 	assert not any("No numeric sweep variables" in item for item in result.diagnostics)

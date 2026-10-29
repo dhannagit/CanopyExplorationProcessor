@@ -180,7 +180,6 @@ Project-level values override the safe defaults in `.gitlab-ci.yml`.
 | `CANOPY_WINDOWS_IMAGE` | empty | Required approved versioned Windows image; no pipeline starts without it. |
 | `CANOPY_MR_VALIDATION_ENABLED` | `false` | Enable same-project MR checks only with safe non-production image/dependency access. Fork MR pipelines remain excluded. |
 | `CANOPY_COMPILE_INSTALLER` | `false` | Set to `true` only for approved protected-tag NSIS builds. |
-| `CANOPY_FULL_TESTS` | `false` | Set to `true` only after all approved sample datasets are available in the checkout. |
 | `CANOPY_RELEASE_APPROVED` | `false` | Protected owner approval of packaging, artifact delivery, audience and retention. |
 | `CANOPY_SIGNING_POLICY` | `unset` | Protected owner decision: `required` or `not-required`; unset blocks production. |
 | `CANOPY_RELEASE_RETENTION` | `90 days` | Set approved production artifact expiry; the default is not an approval. |
@@ -212,10 +211,10 @@ The jobs run in this order:
 
 1. `runner_preflight`: Windows/tool availability and tag/version checks. It does
    not establish registry access; dependency installation checks that next.
-2. `test_windows`: install the committed development `uv.lock`, run tests offscreen,
-   and produce `reports/junit.xml`. By default this explicitly selects tests without
-   external datasets; it is not a full numerical parity gate. Full tests require
-   approved fixtures, not a copy committed to the repo or uploaded as artifacts.
+2. `test_windows`: install the committed development `uv.lock`, run the complete
+   pytest suite except tests marked `local_data`, and produce `reports/junit.xml`.
+   This covers synthetic and fixture-independent tests from all test modules. It
+   does not use or upload protected sample datasets.
 3. `package_windows`: build versioned ZIP/package assets, verify checksums, install
    the ZIP in a temporary environment with its production dependency lock, run the
    installed Qt/native-library smoke check and remove that test install. Protected
@@ -226,15 +225,19 @@ The jobs run in this order:
    retain it as a job artifact.
    This stage exists only when `CANOPY_COMPILE_INSTALLER=true` and ref/policy rules
    allow it.
-5. `release_windows`: for matching protected version tags, an authorized operator
+5. `nsis_smoke`: on a protected default-branch preview, merge package and compiler
+   artifacts, recompute checksums, and silently install/uninstall both ZIP and EXE.
+   It publishes the verified preview bundle for seven days and declares no
+   production environment.
+6. `release_windows`: for matching protected version tags, an authorized operator
    manually starts finalization after package and NSIS jobs. The job exists only
    with release approval, installer compilation and explicit signing policy. It
    adds the setup EXE, regenerates checksums, then smoke-installs and uninstalls
    both release routes. It declares `production/windows`; this is a blocking manual
    deployment, not automatic production delivery on branch pushes.
 
-Only successful package/release jobs upload `dist/releases/`. Preview artifacts
-expire after seven days; JUnit/preflight reports after 30 days. Production expiry
+Only successful package, preview-smoke, and release jobs upload `dist/releases/`.
+Preview artifacts expire after seven days; JUnit/preflight reports after 30 days. Production expiry
 uses `CANOPY_RELEASE_RETENTION`, subject to instance policy. All artifacts require
 Developer-or-higher access in the YAML. This does not distinguish producing-team
 members from other Developers: restrict project membership accordingly. Do not
@@ -297,23 +300,44 @@ Start with the setup and preferences tests:
 The final line should report tests passed, with no error traceback. The unique
 temporary folder avoids conflicts with older admin-created test directories.
 
-For full analysis/GUI regression testing, provide the `DATA_Raw`, `DATA_dXpx` and
-`BaselineExample` sample datasets, then run the full suite. Some tests cannot even
-be collected without these external fixtures:
+The protected sample datasets are not stored in GitLab. Each maintainer can use
+their own authorized Canopy data; no common dataset source is required. Place the
+contents of the raw study, matching DXPX study, and baseline in the local
+`DATA_Raw`, `DATA_dXpx`, and `BaselineExample` folders at the repository root.
+Keep the folders themselves through their `.gitkeep` placeholders, but never
+force-add their contents. The circuit workbook is also local-only and remains
+ignored as `*.xlsx`; for GUI/turn-zone data tests, place
+`CircuitsData_Canopy_Hypercar.xlsx` in the repository root. Do not copy any of
+these files to CI artifacts or release bundles.
+
+For `local_data` tests, provide a raw exploration with
+`exploration-map.json`, `scalar-inputs.csv`, `scalar-inputs-metadata.csv`, and
+numbered `job-document.json` files; a paired numbered DXPX study with at least
+two sweep variables and `gCarPotential`; phase flags for GUI filter integration;
+a multi-lap baseline in `BaselineExample`; and a workbook containing the paired
+DXPX track's turn zones. Baseline DXPX should use the same track and preferably a
+comparable car. The fixture helpers find compatible local paths and report missing
+requirements without accessing them during ordinary pytest collection.
+
+Before committing, run the fixture-independent profile, then the local-data profile
+and combined suite:
 
 ```powershell
+.\.venv\Scripts\python.exe -m pytest -m "not local_data" -q --basetemp (Join-Path $env:TEMP ('canopy-exploration-processor-ci-tests-' + [guid]::NewGuid().ToString('N')))
+.\.venv\Scripts\python.exe -m pytest -m local_data -q --basetemp (Join-Path $env:TEMP ('canopy-exploration-processor-local-data-' + [guid]::NewGuid().ToString('N')))
 .\.venv\Scripts\python.exe -m pytest -q --basetemp (Join-Path $env:TEMP ('canopy-exploration-processor-full-tests-' + [guid]::NewGuid().ToString('N')))
 ```
 
-Focused setup tests do not establish numerical parity. Record any unavailable
-fixtures or untested workflows in the release notes.
+The GitLab `test_windows` job always runs `-m "not local_data"`; there is no CI
+switch for protected-data tests. The local-data profile is maintainer/developer
+only. Record any local-data tests not run or failed in release notes.
 
 ### Step 4: Build The Downloads
 
 To create the ZIP and Python package assets locally:
 
 ```powershell
-\.\installer\build_release.ps1
+.\installer\build_release.ps1
 ```
 
 The setup EXE is built in GitLab. Enable `CANOPY_COMPILE_INSTALLER` only after
@@ -612,7 +636,8 @@ approved corporate tooling interactively if IT needs detailed repository errors.
 | Production job is absent | Confirm protected matching version tag, release approval and explicit signing policy; default-branch builds are previews only. |
 | Signing fails | Confirm the absolute approved adapter path, expected thumbprint, timestamp and corporate trust. Do not disable required signing to bypass failure. |
 | CI job stays pending | Confirm the runner tag, runner/project permission, protected-runner settings and Windows executor/image with IT. |
-| CI tests pass but full data scenarios are absent | Default jobs intentionally exclude external fixtures. Provision approved data and enable `CANOPY_FULL_TESTS`. |
+| Local-data tests report missing prerequisites | Provision authorized data under the ignored repository-root folders and retry `pytest -m local_data`; never upload those files to GitLab. |
+| Preview installer smoke fails | Inspect `nsis_smoke` logs and its short-lived artifact; production release remains blocked until preview install/uninstall succeeds. |
 | Artifact download expired/denied | Check job retention/Keep policy and project membership. A Release link cannot bypass either. |
 
 ## Release Acceptance Checklist

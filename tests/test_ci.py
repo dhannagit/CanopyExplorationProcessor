@@ -12,15 +12,29 @@ ROOT = Path(__file__).parents[1]
 
 
 def test_public_commands_use_full_product_name():
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    configuration = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    project = configuration["project"]
     assert set(project["scripts"]) == {"canopy-exploration-processor-gui"}
     assert set(project["gui-scripts"]) == {"canopy-exploration-processor"}
+    assert any(
+        marker.startswith("local_data:")
+        for marker in configuration["tool"]["pytest"]["ini_options"]["markers"]
+    )
 
     entry_points = (ROOT / "src" / "canopy_exploration_processor.egg-info" / "entry_points.txt").read_text()
     assert "canopy-exploration-processor-gui = canopy_processor.ui.app:main" in entry_points
     assert "canopy-exploration-processor = canopy_processor.ui.app:main" in entry_points
     metadata = (ROOT / "src" / "canopy_exploration_processor.egg-info" / "PKG-INFO").read_text()
     assert "Summary: Canopy Exploration Processor for analyzing Canopy simulation sweeps." in metadata
+
+
+def test_local_sample_roots_are_present_but_their_contents_are_ignored():
+    ignore_rules = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    for directory in ("DATA_Raw", "DATA_dXpx", "BaselineExample"):
+        assert f"/{directory}/*" in ignore_rules
+        assert f"!/{directory}/.gitkeep" in ignore_rules
+        assert (ROOT / directory / ".gitkeep").is_file()
+    assert "*.xlsx" in ignore_rules
 
 
 def test_pipeline_is_opt_in_protected_and_artifact_only():
@@ -30,6 +44,7 @@ def test_pipeline_is_opt_in_protected_and_artifact_only():
     pipeline = yaml.safe_load(pipeline_bytes.decode("ascii"))
     assert pipeline["variables"]["CANOPY_CI_ENABLED"] == "false"
     assert pipeline["variables"]["CANOPY_COMPILE_INSTALLER"] == "false"
+    assert "CANOPY_FULL_TESTS" not in pipeline["variables"]
     assert pipeline["workflow"]["rules"][0]["when"] == "never"
     assert any("CI_COMMIT_REF_PROTECTED" in rule.get("if", "") for rule in pipeline["workflow"]["rules"])
     assert pipeline["variables"]["CANOPY_WINDOWS_IMAGE"] == ""
@@ -47,7 +62,7 @@ def test_pipeline_is_opt_in_protected_and_artifact_only():
     assert "environment" not in pipeline["package_windows"]
     nsis_job = pipeline["nsis_compile"]
     assert [need["job"] for need in pipeline["release_windows"]["needs"]] == [
-        "package_windows", "nsis_compile"
+        "package_windows", "nsis_compile", "nsis_smoke"
     ]
     assert pipeline["release_windows"]["rules"][0]["allow_failure"] is False
     assert pipeline["include"][0]["file"] == ["global-settings.yml"]
@@ -63,9 +78,28 @@ def test_pipeline_is_opt_in_protected_and_artifact_only():
     assert nsis_job["artifacts"]["paths"] == [
         "nsis_compile_files/*.exe"
     ]
+    smoke_job = pipeline["nsis_smoke"]
+    assert smoke_job["stage"] == "installer_smoke"
+    assert "environment" not in smoke_job
+    assert smoke_job["variables"]["CANOPY_BUILD_KIND"] == "preview"
+    assert [need["job"] for need in smoke_job["needs"]] == ["package_windows", "nsis_compile"]
+    assert "PreviewSmoke" in smoke_job["script"][0]
+    assert smoke_job["artifacts"]["paths"] == ["dist/releases/"]
+    assert pipeline["release_windows"]["needs"][2] == {
+        "job": "nsis_smoke", "artifacts": False, "optional": True
+    }
     assert pipeline["package_windows"]["needs"][0]["job"] == "test_windows"
     assert pipeline["package_windows"]["artifacts"]["paths"] == ["dist/releases/"]
     assert pipeline["test_windows"]["artifacts"]["reports"]["junit"] == "reports/junit.xml"
+    for job in pipeline.values():
+        if not isinstance(job, dict):
+            continue
+        artifact_paths = job.get("artifacts", {}).get("paths", [])
+        assert not any(
+            protected_name in path
+            for path in artifact_paths
+            for protected_name in ("DATA_Raw", "DATA_dXpx", "BaselineExample", "CircuitsData_Canopy_Hypercar.xlsx")
+        )
     assert not any("push" in name or "publish" in name for name in pipeline if isinstance(pipeline[name], dict))
 
 
@@ -96,8 +130,9 @@ try { Test-ProductionPolicy 'production' 'v0.1.0' 'true' 'true' 'unset'; throw '
 try { Test-ReleaseVersion '0.1.0' 'v0.2.0'; throw 'Mismatched tag accepted' } catch {
     if ($_.Exception.Message -ne 'CI tag must match the version in pyproject.toml') { throw }
 }
-if ((Get-TestArguments $false) -notcontains 'tests/test_installer.py') { throw 'Windows deployment checks missing' }
-if ((Get-TestArguments $true).Count -ne 2) { throw 'Full-suite selector still excludes tests' }
+$testArguments = @(Get-TestArguments)
+if (($testArguments -join ' ') -ne '-m pytest -m not local_data') { throw 'CI must run all tests except the local-data profile' }
+if ($testArguments -contains '-k' -or $testArguments -contains 'tests/test_installer.py') { throw 'CI test selector still uses a filename allowlist' }
 $asset = Join-Path $env:CANOPY_CI_TEMP 'asset.exe'
 Set-Content -LiteralPath $asset -Value 'test bytes'
 $digest = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()

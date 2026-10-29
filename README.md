@@ -121,3 +121,37 @@ access to its source data and, if required, the workbook. Use **Export Figure** 
 Each release also includes a standard wheel for future integration into another
 tool. The package remains separate from the Windows installer; no plugin or host
 framework integration is imposed on the analysis modules.
+
+## Developer Tests And Local Data
+
+Run the non-local suite before committing. It covers all synthetic and
+fixture-independent tests across the test modules:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -m "not local_data" -q --basetemp (Join-Path $env:TEMP ('canopy-exploration-processor-ci-tests-' + [guid]::NewGuid().ToString('N')))
+```
+
+To run the real-data integration tests as well, ask a maintainer for an approved
+sample or use compatible Canopy data you are authorized to access. Place the
+contents, not archives, in the ignored `DATA_Raw`, `DATA_dXpx`, and
+`BaselineExample` folders at the repository root. The test data must include a
+raw exploration with metadata, at least two numeric sweep variables, its paired
+numbered DXPX runs, `gCarPotential`, phase data for GUI filter coverage, a
+multi-lap baseline, and a circuit workbook containing the paired run's track.
+Keep the workbook at the repository root as
+`CircuitsData_Canopy_Hypercar.xlsx`.
+
+These folders and workbook are ignored by Git. Keep their contents local: do not
+force-add, commit, package, or upload them to GitLab. Check the ignore behavior
+before staging changes. Run the local-data profile, then the combined suite, before
+committing:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -m local_data -q --basetemp (Join-Path $env:TEMP ('canopy-exploration-processor-local-data-' + [guid]::NewGuid().ToString('N')))
+.\.venv\Scripts\python.exe -m pytest -q --basetemp (Join-Path $env:TEMP ('canopy-exploration-processor-full-tests-' + [guid]::NewGuid().ToString('N')))
+```
+
+GitLab runs the complete test suite except `local_data`; protected samples are
+never required or uploaded in CI. On a protected default branch, the optional
+`nsis_smoke` job validates the preview installer without creating a production
+release. Production release remains a separate approved, protected-tag action.

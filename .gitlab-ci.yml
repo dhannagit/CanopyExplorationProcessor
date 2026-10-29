@@ -3,6 +3,7 @@ stages:
   - test
   - package
   - installer
+  - installer_smoke
   - release
 
 include:
@@ -19,7 +20,6 @@ variables:
   CANOPY_SIGNING_POLICY: "unset"
   CANOPY_RELEASE_RETENTION: "90 days"
   CANOPY_COMPILE_INSTALLER: "false"
-  CANOPY_FULL_TESTS: "false"
   UV_SYSTEM_CERTS: "1"
   UV_PYTHON_INSTALL_MIRROR: "https://artifactory.michelin.com/artifactory/github-generic/astral-sh/python-build-standalone/releases/download"
   UV_PROJECT_ENVIRONMENT: "$CI_PROJECT_DIR/.ci-venv"
@@ -232,6 +232,29 @@ nsis_compile:
     paths:
       - nsis_compile_files/*.exe
 
+nsis_smoke:
+  stage: installer_smoke
+  variables:
+    CANOPY_BUILD_KIND: "preview"
+  needs:
+    - job: package_windows
+      artifacts: true
+    - job: nsis_compile
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $CANOPY_COMPILE_INSTALLER == "true"'
+      when: on_success
+    - when: never
+  script:
+    - powershell.exe -NoProfile -NonInteractive -File .\ci\run.ps1 -Phase PreviewSmoke
+  artifacts:
+    access: developer
+    name: "CanopyExplorationProcessor-preview-$CI_COMMIT_SHORT_SHA"
+    when: on_success
+    expire_in: 7 days
+    paths:
+      - dist/releases/
+
 release_windows:
   stage: release
   variables:
@@ -246,6 +269,9 @@ release_windows:
       artifacts: true
     - job: nsis_compile
       artifacts: true
+    - job: nsis_smoke
+      artifacts: false
+      optional: true
   environment:
     name: production/windows
     deployment_tier: production

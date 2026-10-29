@@ -145,21 +145,38 @@ disabled until these external contracts are supplied and validated.
 
 ## ADR-011 - Compile Windows setup with the corporate NSIS image
 
-**Status:** Accepted; GitLab compile and signing validation pending.
+**Status:** Accepted; GitLab NSIS compilation succeeded. Preview smoke job is implemented; its GitLab run and production signing validation are pending.
 
 **Decision:** Use a local `nsis_compile` job on the approved corporate NSIS image
 to compile `installer/CanopyExplorationProcessor.nsi`. The package job remains the
 source of the versioned Windows ZIP; the compile job extracts that bundle and emits
 `CanopyExplorationProcessor-<version>-Setup.exe` as an expiring job artifact. A
-protected-tag finalizer combines the EXE with package assets, recalculates hashes,
-and smoke-installs and uninstalls both formats. Keep the app's wheel/private-env
-deployment, explicit external signer adapter, and disabled-by-default CI policy.
+protected-default-branch `nsis_smoke` job combines preview artifacts, recalculates
+hashes, and smoke-installs and uninstalls both formats without declaring production.
+A protected-tag finalizer repeats validation under the approved signing policy.
+Keep the app's wheel/private-env deployment and disabled-by-default CI policy.
 
 **Reason:** The corporate Windows image provides the approved NSIS compiler. A
-local ASCII-named job avoids coupling project configuration to a shared template's
-emoji-bearing job key while keeping the compiler, artifact handoff and release
-checks within the approved corporate runner. A successful local recipe review is
-not a substitute for the pending GitLab compile and protected signing run.
+local ASCII-named job keeps compiler and artifact handling explicit in this
+project. The successful compile proves the recipe emits an installer; preview
+install/uninstall and protected production signing/release checks remain separate gates.
+
+## ADR-012 - Keep protected sample data local to developers
+
+**Status:** Accepted; implementation in place, combined-suite and GitLab preview validation pending.
+
+**Decision:** Keep the conventional `DATA_Raw`, `DATA_dXpx`, and `BaselineExample`
+directories visible through tracked placeholders but ignore all dataset contents.
+Keep the circuit workbook local as well. Each maintainer supplies their own
+authorized, compatible dataset; no single shared data source is required. Mark
+real-data integration/parity tests `local_data`; make collection safe without
+those files; run the complete remaining synthetic suite in CI. CI must never
+cache, package, or upload the protected data.
+
+**Reason:** GitLab does not meet the security requirements for these datasets.
+Maintainers still need real-input compatibility checks, while synthetic tests can
+cover format, calculations, UI behavior and pipeline logic without disclosing
+simulation data.
 
 ## Presentation Evidence To Capture
 

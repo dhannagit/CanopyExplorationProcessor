@@ -32,10 +32,33 @@ workflow:
     - if: '$CANOPY_WINDOWS_IMAGE == null || $CANOPY_WINDOWS_IMAGE == ""'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CANOPY_MR_VALIDATION_ENABLED == "true" && $CI_MERGE_REQUEST_SOURCE_PROJECT_ID == $CI_PROJECT_ID'
+      changes:
+        paths:
+          - .gitlab-ci.yml
+          - .gitignore
+          - MANIFEST.in
+          - pyproject.toml
+          - uv.lock
+          - ci/**/*
+          - installer/**/*
+          - src/**/*
+          - tests/**/*
     - if: '$CI_COMMIT_REF_PROTECTED != "true"'
       when: never
     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "push")'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        paths:
+          - .gitlab-ci.yml
+          - .gitignore
+          - MANIFEST.in
+          - pyproject.toml
+          - uv.lock
+          - ci/**/*
+          - installer/**/*
+          - src/**/*
+          - tests/**/*
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "web"'
     - when: never
 
 default:

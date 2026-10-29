@@ -47,6 +47,21 @@ def test_pipeline_is_opt_in_protected_and_artifact_only():
     assert "CANOPY_FULL_TESTS" not in pipeline["variables"]
     assert pipeline["workflow"]["rules"][0]["when"] == "never"
     assert any("CI_COMMIT_REF_PROTECTED" in rule.get("if", "") for rule in pipeline["workflow"]["rules"])
+    workflow_rules = pipeline["workflow"]["rules"]
+    mr_rule = next(rule for rule in workflow_rules if "merge_request_event" in rule.get("if", ""))
+    push_rule = next(rule for rule in workflow_rules if "CI_PIPELINE_SOURCE == \"push\"" in rule.get("if", ""))
+    web_rule = next(rule for rule in workflow_rules if "CI_PIPELINE_SOURCE == \"web\"" in rule.get("if", ""))
+    tag_rule = next(rule for rule in workflow_rules if "CI_COMMIT_TAG =~" in rule.get("if", ""))
+    expected_pipeline_paths = {
+        ".gitlab-ci.yml", ".gitignore", "MANIFEST.in", "pyproject.toml", "uv.lock",
+        "ci/**/*", "installer/**/*", "src/**/*", "tests/**/*",
+    }
+    assert set(mr_rule["changes"]["paths"]) == expected_pipeline_paths
+    assert set(push_rule["changes"]["paths"]) == expected_pipeline_paths
+    assert "README.md" not in push_rule["changes"]["paths"]
+    assert not any(path.startswith("docs/") for path in push_rule["changes"]["paths"])
+    assert "changes" not in tag_rule
+    assert "changes" not in web_rule
     assert pipeline["variables"]["CANOPY_WINDOWS_IMAGE"] == ""
     assert pipeline["default"]["image"]["name"] == "$CANOPY_WINDOWS_IMAGE"
     assert pipeline["variables"]["CANOPY_RELEASE_APPROVED"] == "false"

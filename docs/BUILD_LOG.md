@@ -2,6 +2,50 @@
 
 This is the chronological engineering record for the Python migration. Keep entries concise and factual. Each entry should capture what changed, why it changed, how it was verified, and what comes next.
 
+## 2026-10-29 - Keep protected sample tests local and add preview installer validation
+
+**Goal:** Keep protected Canopy datasets out of GitLab while retaining real-data
+maintainer coverage, and verify the NSIS installer before production release.
+
+**Changed:** Added tracked placeholders for the ignored `DATA_Raw`, `DATA_dXpx`,
+and `BaselineExample` roots; corrected their casing; registered the `local_data`
+pytest marker; and moved sample discovery into lazy fixtures. Converted analysis,
+metric, exploration, turn-zone, result, and parser-contract tests to synthetic data
+where feasible. CI now runs the entire suite except `local_data`; the old CI
+full-data toggle and file allowlist were removed. Added a protected-default-branch
+`nsis_smoke` job that combines package/compiler artifacts, refreshes checksums, and
+silently installs/uninstalls ZIP and EXE. Updated maintainer and release guides.
+
+**Evidence:** The non-local profile passed (141 tests, 12 local tests deselected);
+the local-data profile passed on this workstation (12 tests); CI configuration
+tests passed (9). The GitLab `nsis_compile` job succeeded in the previous pipeline.
+The combined suite and new GitLab `nsis_smoke` job have not yet been run.
+
+**Next:** Run the combined suite locally before committing. Then confirm CI reports
+the non-local profile and run the protected-branch NSIS preview smoke. Production
+finalization remains a separate approved protected-tag step.
+
+## 2026-10-29 - Separate local sample tests from CI and smoke-test NSIS previews
+
+**Goal:** Keep protected Canopy datasets out of GitLab without losing maintainer
+real-data coverage, and verify compiled preview installers before production.
+
+**Changed:** Added ignored local sample roots with tracked placeholders, pytest's
+`local_data` profile, lazy sample fixtures, synthetic metadata/MAT/workbook tests,
+and a CI selector that runs the entire suite except `local_data`. Added a
+protected-default-branch `nsis_smoke` job that combines package/compiler artifacts,
+refreshes checksums, and silently installs/uninstalls ZIP and EXE without a
+production environment. Updated contributor and distribution instructions.
+
+**Evidence:** The complete non-local profile passed (141 tests; 12 local-data tests
+excluded). CI configuration tests passed (9). The NSIS compile succeeded in the
+preceding GitLab run. Local `local_data` tests and the new `nsis_smoke` GitLab job
+have not yet been run; production signing/finalization remain pending.
+
+**Next:** Maintainers provision authorized samples locally and run the local-data
+and combined suites before committing. Then validate the protected-branch preview
+smoke job; only after acceptance proceed to the protected-tag manual release job.
+
 ## 2026-10-28 - Move Windows setup to the corporate NSIS job
 
 **Goal:** Replace the Inno Setup route with the corporate Windows NSIS compiler

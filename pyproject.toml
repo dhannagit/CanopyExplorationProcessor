@@ -37,6 +37,9 @@ canopy-exploration-processor = "canopy_processor.ui.app:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "local_data: requires locally provisioned Canopy Exploration Processor test data",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

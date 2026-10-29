@@ -2,14 +2,15 @@ from pathlib import Path
 
 import numpy as np
 
-from canopy_processor import default_metrics, evaluate_metric, load_dxpx
-
-
-SAMPLE_DXPX = next((Path(__file__).parents[1] / "DATA_dXpx").rglob("*.dXpx"))
+from canopy_processor import default_metrics, evaluate_metric
+from canopy_processor.dxpx import DXPXRun
 
 
 def test_default_front_force_metric_averages_left_and_right() -> None:
-    run = load_dxpx(SAMPLE_DXPX)
+    run = DXPXRun(Path("synthetic.dxpx"), {}, {
+        "FxTyreFL_filt": np.array([10.0, 12.0, 14.0]),
+        "FxTyreFR_filt": np.array([12.0, 14.0, 16.0]),
+    })
     metrics = default_metrics()
 
     expected = (

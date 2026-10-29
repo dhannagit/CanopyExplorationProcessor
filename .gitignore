@@ -6,9 +6,12 @@ reports/
 .ruff_cache/
 __pycache__/
 *.pyc
-BaselineExample/
-DATA_dXpx/
-DATA_raw/
+/DATA_Raw/*
+!/DATA_Raw/.gitkeep
+/DATA_dXpx/*
+!/DATA_dXpx/.gitkeep
+/BaselineExample/*
+!/BaselineExample/.gitkeep
 *.m
 *.xlsx
 build/

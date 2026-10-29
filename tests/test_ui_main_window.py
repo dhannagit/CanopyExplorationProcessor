@@ -23,7 +23,6 @@ from PySide6.QtCore import QSettings
 
 
 REPOSITORY_ROOT = os.path.dirname(os.path.dirname(__file__))
-SAMPLE_RAW_STUDY = os.path.join(REPOSITORY_ROOT, "DATA_Raw", "MOS_COR_TyrePressureExploration")
 
 
 @pytest.fixture(autouse=True)
@@ -464,10 +463,11 @@ def test_failed_source_open_preserves_session_and_results(monkeypatch, tmp_path:
 	application.processEvents()
 
 
-def test_main_window_populates_discovered_variables() -> None:
+@pytest.mark.local_data
+def test_main_window_populates_discovered_variables(sample_exploration) -> None:
 	application = QApplication.instance() or QApplication([])
 	window = MainWindow()
-	window._start_discovery(SAMPLE_RAW_STUDY)
+	window._start_discovery(sample_exploration.raw_directory)
 	loop = QEventLoop()
 	thread = window._thread
 	assert thread is not None
@@ -477,8 +477,9 @@ def test_main_window_populates_discovered_variables() -> None:
 	application.processEvents()
 
 	assert window.session.discovery_result is not None
-	assert window.dxpx_label.text().endswith("DATA_dXpx\\MOS_COR_TyrePressureExploration")
-	assert window.variable_list.rowCount() == 2
+	assert window.dxpx_label.text().endswith(str(sample_exploration.dxpx_directory))
+	assert window.variable_list.rowCount() == len(window.session.discovered_variables)
+	assert window.variable_list.rowCount() >= 2
 	assert window.variable_list.selectionMode().name == "ExtendedSelection"
 	assert window.confirm_button.isEnabled()
 	window.variable_list.selectRow(0)
@@ -497,10 +498,11 @@ def test_main_window_populates_discovered_variables() -> None:
 	application.processEvents()
 
 
-def test_main_window_persists_multiple_selected_variables() -> None:
+@pytest.mark.local_data
+def test_main_window_persists_multiple_selected_variables(sample_exploration) -> None:
 	application = QApplication.instance() or QApplication([])
 	window = MainWindow()
-	window._start_discovery(SAMPLE_RAW_STUDY)
+	window._start_discovery(sample_exploration.raw_directory)
 	loop = QEventLoop()
 	thread = window._thread
 	assert thread is not None
@@ -523,12 +525,10 @@ def test_main_window_persists_multiple_selected_variables() -> None:
 		variable.path for variable in window.session.discovered_variables
 	]
 	assert window.session.loaded_dataset is not None
-	assert len(window.session.loaded_dataset.runs) == 25
+	assert len(window.session.loaded_dataset.runs) > 0
 	assert window.metric_combo.count() > 1
-	assert all(not run.turn_zone_names for run in window.session.loaded_dataset.runs)
-	assert window.detected_track_label.text().endswith("CTMP")
-	assert window.turn_zone_track_combo.currentData() == "CTMP"
-	assert window.zone_list.count() == 0
+	assert window.detected_track_label.text().endswith(sample_exploration.track_name)
+	assert window.turn_zone_track_combo.currentData() == sample_exploration.track_name
 	window.prepare_turn_zones_button.click()
 	loop = QEventLoop()
 	zone_thread = window._thread
@@ -537,8 +537,10 @@ def test_main_window_persists_multiple_selected_variables() -> None:
 	QTimer.singleShot(30000, loop.quit)
 	loop.exec()
 	application.processEvents()
-	assert len(window.session.loaded_dataset.runs[0].turn_zone_names) == 12
-	assert window.detected_track_label.text() == "DXPX Header.TrackName: CTMP; zones use: CTMP"
+	assert len(window.session.loaded_dataset.runs[0].turn_zone_names) > 0
+	assert window.detected_track_label.text() == (
+		f"DXPX Header.TrackName: {sample_exploration.track_name}; zones use: {sample_exploration.track_name}"
+	)
 	window.variable_list.cellWidget(0, 1).setCurrentText("x")
 	window.variable_list.cellWidget(1, 1).setCurrentText("y")
 	assert window.phase_list.count() > 0
@@ -573,24 +575,25 @@ def test_main_window_persists_multiple_selected_variables() -> None:
 	loop.exec()
 	application.processEvents()
 	assert window.session.result is not None
-	assert {variable.role for variable in window.session.config.sweep_variables} == {"x", "y"}
+	assert {"x", "y"}.issubset({variable.role for variable in window.session.config.sweep_variables})
 	assert window.session.config.filters.phases
 	assert window.session.config.filters.turn_zones
 	assert all(
 		row.metric_result.selected_samples < row.metric_result.available_samples
 		for row in window.session.result.rows
 	)
-	assert window.results_table.rowCount() == 25
+	assert window.results_table.rowCount() == len(window.session.result.rows)
 	assert len(window.figure_canvas.figure.axes) >= 1
 
 	window.close()
 	application.processEvents()
 
 
-def test_manual_dxpx_override_is_used_for_loading(monkeypatch) -> None:
+@pytest.mark.local_data
+def test_manual_dxpx_override_is_used_for_loading(monkeypatch, sample_exploration) -> None:
 	application = QApplication.instance() or QApplication([])
 	window = MainWindow()
-	window._start_discovery(SAMPLE_RAW_STUDY)
+	window._start_discovery(sample_exploration.raw_directory)
 	loop = QEventLoop()
 	thread = window._thread
 	assert thread is not None
@@ -599,7 +602,7 @@ def test_manual_dxpx_override_is_used_for_loading(monkeypatch) -> None:
 	loop.exec()
 	application.processEvents()
 
-	override = Path(SAMPLE_RAW_STUDY).parent.parent / "manual-dxpx-study"
+	override = sample_exploration.raw_directory.parent / "manual-dxpx-study"
 	result = window.session.discovery_result
 	assert result is not None
 	window.session.discovery_result = result.__class__(

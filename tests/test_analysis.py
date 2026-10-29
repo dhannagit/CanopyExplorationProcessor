@@ -5,17 +5,12 @@ import pytest
 
 from canopy_processor import (
 	FilterConfig,
-	add_turn_zones,
 	analyze_metric,
 	build_filter_mask,
-	default_metrics,
-	load_dxpx,
 	reduce_signal,
 )
-
-
-SAMPLE_DXPX = next((Path(__file__).parents[1] / "DATA_dXpx").rglob("*.dXpx"))
-WORKBOOK = Path(__file__).parents[1] / "CircuitsData_Canopy_Hypercar.xlsx"
+from canopy_processor.dxpx import DXPXRun
+from canopy_processor.metric import source_metric
 
 
 def test_reduce_signal_supports_nan_aware_methods() -> None:
@@ -27,11 +22,11 @@ def test_reduce_signal_supports_nan_aware_methods() -> None:
 
 
 def test_build_filter_mask_combines_phase_and_zone() -> None:
-	run = load_dxpx(SAMPLE_DXPX)
-	run.data["phaseA"] = np.array([1, 1, 0, 0])
-	run.data["phaseB"] = np.array([0, 1, 1, 0])
-	run.data["zoneA"] = np.array([1, 0, 1, 0])
-	run.data["sLap"] = np.arange(4)
+	run = DXPXRun(Path("synthetic.dxpx"), {}, {
+		"phaseA": np.array([1, 1, 0, 0]),
+		"phaseB": np.array([0, 1, 1, 0]),
+		"zoneA": np.array([1, 0, 1, 0]),
+	})
 
 	filters = FilterConfig(
 		phases=("phaseA", "phaseB"),
@@ -44,10 +39,14 @@ def test_build_filter_mask_combines_phase_and_zone() -> None:
 
 
 def test_analyze_metric_reports_filtered_sample_count() -> None:
-	run = add_turn_zones(load_dxpx(SAMPLE_DXPX), WORKBOOK)
+	run = DXPXRun(Path("synthetic.dxpx"), {}, {
+		"sLap": np.arange(4),
+		"grip": np.array([1.0, 2.0, 3.0, 4.0]),
+		"isTurnZone1": np.array([1, 0, 1, 0]),
+	})
 	filters = FilterConfig(turn_zones=("isTurnZone1",))
-	result = analyze_metric(run, default_metrics()["gCarPotential"], filters)
+	result = analyze_metric(run, source_metric("grip", "Grip", "grip", "g"), filters)
 
-	assert result.metric_name == "gCarPotential"
-	assert result.selected_samples > 0
-	assert result.selected_samples < result.available_samples
+	assert result.metric_name == "grip"
+	assert result.selected_samples == 2
+	assert result.available_samples == 4

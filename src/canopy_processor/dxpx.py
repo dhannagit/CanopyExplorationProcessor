@@ -7,6 +7,7 @@ while converting MATLAB structs into ordinary Python mappings.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,12 @@ class DXPXRun:
     type_info: dict[str, Any] | Any = None
 
     @property
+    def run_index(self) -> int:
+        """Return the zero-based sweep index from MATLAB or converter run folders."""
+
+        return run_index_from_path(self.path)
+
+    @property
     def track_name(self) -> str | None:
         value = self.header.get("TrackName")
         return None if value is None else str(value)
@@ -42,6 +49,19 @@ class DXPXRun:
             if name.removeprefix("isTurnZone").isdigit()
             else name,
         )
+
+
+def run_index_from_path(path: str | Path) -> int:
+    """Read zero-based MATLAB folder or one-based Python ``RunNN`` indexing."""
+
+    file_path = Path(path)
+    folder_name = file_path.parent.name
+    if folder_name.isdigit():
+        return int(folder_name)
+    match = re.search(r"(?:^|[_-])Run(\d+)$", folder_name, re.IGNORECASE)
+    if match:
+        return int(match.group(1)) - 1
+    raise ValueError(f"Run folder is not numbered, cannot determine run index: {file_path}")
 
 
 def load_dxpx(path: str | Path) -> DXPXRun:

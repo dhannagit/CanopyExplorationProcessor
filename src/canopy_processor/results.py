@@ -73,10 +73,7 @@ class GridResult:
 def run_index(run: DXPXRun) -> int:
 	"""Return a run's numbered-folder index, used to join sweep variables."""
 
-	folder_name = run.path.parent.name
-	if not folder_name.isdigit():
-		raise ValueError(f"Run folder is not numbered, cannot determine run index: {run.path}")
-	return int(folder_name)
+	return run.run_index
 
 
 def join_sweep_variables(

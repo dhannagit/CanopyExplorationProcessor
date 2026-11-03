@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 import numpy as np
+from scipy.io import savemat
 
 from canopy_processor import (
 	AnalysisConfig,
@@ -16,6 +17,47 @@ from canopy_processor.dxpx import DXPXRun
 from canopy_processor.metric import source_metric
 from canopy_processor.ui import discover_dataset, load_dataset
 from canopy_processor.ui.pipeline import LoadedDataset, analyze_loaded_dataset, prepare_turn_zones
+
+
+def test_python_converter_header_changes_load_and_join(tmp_path: Path) -> None:
+	study = tmp_path / "PythonStudy"
+	for run_number, (front, rear) in enumerate(((1.8, 2.0), (1.9, 2.1)), start=1):
+		run_directory = study / f"CTMP_Run{run_number:02d}"
+		run_directory.mkdir(parents=True)
+		changes = np.empty((1, 2), dtype=object)
+		changes[0, 0] = {"path": "setup.front.pressure", "value": front}
+		changes[0, 1] = {"path": "setup.rear.pressure", "value": rear}
+		savemat(run_directory / "run.dXpx", {
+			"D": {
+				"Header": {"TrackName": "CTMP", "changes": changes},
+				"Data": {
+					"sLap": np.array([0.0, 1.0, 2.0]),
+					"gCarPotential": np.array([1.0, 2.0 + run_number, 3.0]),
+				},
+			},
+		})
+
+	discovery = discover_dataset(study, converter="python")
+	loaded = load_dataset(discovery)
+	config = AnalysisConfig(
+		dataset=DatasetConfig(dxpx_directory=study, converter="python"),
+		sweep_variables=[
+			SweepVariableConfig("setup.front.pressure", role="x"),
+			SweepVariableConfig("setup.rear.pressure", role="y"),
+		],
+		metric="gCarPotential",
+		plot=PlotConfig(plot_type="heatmap"),
+	)
+	config.validate_ready()
+	assert AnalysisConfig.from_dict(config.to_dict()).dataset.converter == "python"
+	output = analyze_loaded_dataset(loaded, config, discovery.variables)
+
+	assert len(loaded.runs) == 2
+	assert [run.run_index for run in loaded.runs] == [0, 1]
+	assert [row.sweep_values for row in output.rows] == [
+		{"setup.front.pressure": 1.8, "setup.rear.pressure": 2.0},
+		{"setup.front.pressure": 1.9, "setup.rear.pressure": 2.1},
+	]
 
 
 @pytest.mark.local_data

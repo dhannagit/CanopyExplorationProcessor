@@ -30,6 +30,7 @@ class DatasetConfig:
 	track_name: str | None = None
 	confirmed_header_track: str | None = None
 	confirmed_workbook_digest: str | None = None
+	converter: str = "matlab"
 
 	def __post_init__(self) -> None:
 		for name in ("dxpx_directory", "raw_directory", "circuit_workbook"):
@@ -40,6 +41,8 @@ class DatasetConfig:
 			value = getattr(self, name)
 			if value is not None and (not isinstance(value, str) or not value):
 				raise ValueError(f"{name} must be nonempty text or null")
+		if self.converter not in {"matlab", "python"}:
+			raise ValueError(f"Unknown converter: {self.converter}")
 
 
 @dataclass
@@ -182,8 +185,12 @@ class AnalysisConfig:
 		"""Validate complete analysis inputs without rejecting saveable drafts."""
 
 		self.validate()
-		if self.dataset is None or not self.dataset.raw_directory or not self.dataset.dxpx_directory:
-			raise ValueError("Select raw and DXPX study directories")
+		if (
+			self.dataset is None
+			or not self.dataset.dxpx_directory
+			or (self.dataset.converter == "matlab" and not self.dataset.raw_directory)
+		):
+			raise ValueError("Select the required study directories for the chosen converter")
 		if not self.metric:
 			raise ValueError("Select a metric before analysis")
 		if not self.sweep_variables:

@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..exploration import ExplorationDefinition, SweepVariable, discover_job_variables, load_exploration_definition
+from ..exploration import (
+	ExplorationDefinition,
+	SweepVariable,
+	discover_dxpx_variables,
+	discover_job_variables,
+	load_exploration_definition,
+)
 
 @dataclass(frozen=True)
 class DiscoveryResult:
@@ -19,9 +25,15 @@ class DiscoveryResult:
 	exploration: ExplorationDefinition | None
 	diagnostics: tuple[str, ...]
 	dxpx_candidates: tuple[Path, ...] = ()
+	converter: str = "matlab"
 
 
-def discover_dataset(root: str | Path, circuit_workbook: str | Path | None = None) -> DiscoveryResult:
+def discover_dataset(
+	root: str | Path,
+	circuit_workbook: str | Path | None = None,
+	*,
+	converter: str = "matlab",
+) -> DiscoveryResult:
 	"""Discover one raw study and its matching DXPX study directory.
 
 	The selected path is expected to be a single ``StudyName`` directory,
@@ -30,6 +42,34 @@ def discover_dataset(root: str | Path, circuit_workbook: str | Path | None = Non
 
 	root_path = Path(root).expanduser().resolve()
 	diagnostics: list[str] = []
+	if converter not in {"matlab", "python"}:
+		raise ValueError(f"Unknown converter: {converter}")
+	workbook = Path(circuit_workbook).expanduser().resolve() if circuit_workbook else None
+	if workbook is None:
+		diagnostics.append("Configure the circuit workbook folder in File > Settings")
+	elif not workbook.is_file():
+		diagnostics.append(f"Circuit workbook unavailable: {workbook}. Check File > Settings and OneDrive sync.")
+	if converter == "python":
+		dxpx_directory = root_path if any(root_path.rglob("*.dXpx")) else None
+		if dxpx_directory is None:
+			diagnostics.append("No .dXpx files were found below the selected converter study")
+			variables: tuple[SweepVariable, ...] = ()
+		else:
+			variables = discover_dxpx_variables(dxpx_directory)
+			if not variables:
+				diagnostics.append("No numeric sweep variables were found in DXPX Header.changes")
+		return DiscoveryResult(
+			root=root_path,
+			dxpx_directory=dxpx_directory,
+			raw_directory=None,
+			circuit_workbook=workbook,
+			variables=variables,
+			exploration=None,
+			diagnostics=tuple(diagnostics),
+			dxpx_candidates=(dxpx_directory,) if dxpx_directory is not None else (),
+			converter=converter,
+		)
+
 	raw_directory = root_path
 	dxpx_directory = _derive_dxpx_directory(raw_directory)
 	dxpx_candidates = (dxpx_directory,) if dxpx_directory is not None else ()
@@ -43,12 +83,6 @@ def discover_dataset(root: str | Path, circuit_workbook: str | Path | None = Non
 		diagnostics.append("No .dXpx files were found below the selected root")
 	if raw_directory is None:
 		diagnostics.append("No numbered raw job folders were found below the selected root")
-
-	workbook = Path(circuit_workbook).expanduser().resolve() if circuit_workbook else None
-	if workbook is None:
-		diagnostics.append("Configure the circuit workbook folder in File > Settings")
-	elif not workbook.is_file():
-		diagnostics.append(f"Circuit workbook unavailable: {workbook}. Check File > Settings and OneDrive sync.")
 
 	exploration = None
 	variables: tuple[SweepVariable, ...] = ()
@@ -74,6 +108,7 @@ def discover_dataset(root: str | Path, circuit_workbook: str | Path | None = Non
 		exploration=exploration,
 		diagnostics=tuple(diagnostics),
 		dxpx_candidates=dxpx_candidates,
+		converter=converter,
 	)
 
 

@@ -2,6 +2,80 @@
 
 This is the chronological engineering record for the Python migration. Keep entries concise and factual. Each entry should capture what changed, why it changed, how it was verified, and what comes next.
 
+## 2026-11-03 - Fit the window minimum size to the layout
+
+**Goal:** Stop dataset rows overlapping the converter toggle at first launch in MATLAB mode.
+
+**Changed:** The fixed 900x600 window floor was smaller than the layout's own minimum,
+so Qt compressed the dataset form rows. On show and on converter change the window
+minimum is now raised to the layout's minimum size hint (capped to the screen) and
+the window grows if needed. Replaced the deferred layout refresh, which had no effect.
+
+**Evidence:** The complete local suite passed (175 tests), including a check that the
+window and dataset group meet their minimum hints and the toggle row clears the button.
+
+**Next:** Confirm in the desktop GUI after restarting the app.
+
+## 2026-11-03 - Read Python converter sweep metadata from DXPX headers
+
+**Goal:** Keep exploration analysis working with MATLAB and Python converter outputs
+after Python conversion stops storing raw job documents.
+
+**Changed:** Added a MATLAB/Python converter selector to the GUI and saved the mode
+with the dataset recipe. Python discovery now reads numeric `Header.changes`
+entries directly from DXPX files, loads `RunNN` folders without a raw directory,
+and maps their one-based names to zero-based sweep indices. MATLAB discovery and
+numeric run folders remain the defaults.
+
+**Evidence:** The complete local suite passed (174 tests). The supplied MoSport
+converter study loaded 25 runs and discovered front/rear tyre-pressure coordinates
+from every run header. One expected diagnostic remained because no circuit workbook
+was supplied for that direct loader check.
+
+**Next:** Manually review the converter selector and analysis workflow in the
+desktop GUI with the MoSport study.
+
+## 2026-11-03 - Compact the converter selector and Python loader
+
+**Goal:** Keep converter selection compact and avoid showing unused MATLAB source
+controls for Python-converted studies.
+
+**Changed:** Replaced the expanding MATLAB/Python buttons with a fixed 140x32
+animated toggle. Python mode now shows only its study-directory chooser and path;
+MATLAB mode retains the raw/DXPX paths and manual DXPX-folder chooser.
+
+**Evidence:** The complete local suite passed (174 tests). GUI geometry checks at
+900, 1100, and 1920 pixels confirmed the toggle remains contained and non-overlapping.
+
+**Next:** Review the updated control in the desktop GUI.
+
+## 2026-11-03 - Refresh layouts after the initial window show
+
+**Goal:** Prevent controls from appearing partially covered until the user resizes
+or restores the application window.
+
+**Changed:** Schedule a one-time invalidation and activation of descendant layouts
+after the window manager assigns the initial frame geometry, then repaint without
+changing the selected window size.
+
+**Evidence:** The complete local suite passed (175 tests), including first-show
+button text and containment checks.
+
+**Next:** Review the first-launch layout in the desktop GUI.
+
+## 2026-11-03 - Guarantee loader action button height
+
+**Goal:** Keep loader-action labels fully visible with the Windows UI font at first
+launch.
+
+**Changed:** Set a 34-pixel minimum height on the study picker, DXPX picker, and
+variable confirmation buttons so their text does not depend on a later window resize.
+
+**Evidence:** The complete local suite passed (175 tests); the startup label-fit
+regression also passed with Segoe UI loaded when available.
+
+**Next:** Review the loader buttons in the desktop GUI after restarting the app.
+
 ## 2026-10-29 - Keep protected sample tests local and add preview installer validation
 
 **Goal:** Keep protected Canopy datasets out of GitLab while retaining real-data

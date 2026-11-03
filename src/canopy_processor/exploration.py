@@ -8,6 +8,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
+from .dxpx import load_dxpx, run_index_from_path
+
 
 @dataclass(frozen=True)
 class JobRecord:
@@ -98,6 +102,53 @@ def discover_job_variables(raw_directory: str | Path) -> tuple[SweepVariable, ..
             if path and isinstance(value, (int, float)) and not isinstance(value, bool):
                 values = by_path.setdefault(path, [float("nan")] * run_count)
                 values[record.index] = float(value)
+
+    return tuple(
+        SweepVariable(path=path, units=None, values=tuple(values))
+        for path, values in by_path.items()
+    )
+
+
+def discover_dxpx_variables(dxpx_directory: str | Path) -> tuple[SweepVariable, ...]:
+    """Discover numeric sweep variables from each run's DXPX Header.changes cell."""
+
+    files = [
+        path for path in Path(dxpx_directory).rglob("*")
+        if path.is_file() and path.suffix.lower() == ".dxpx"
+    ]
+    indexed_files: list[tuple[int, Path]] = []
+    for path in files:
+        try:
+            indexed_files.append((run_index_from_path(path), path))
+        except ValueError:
+            continue
+    ordered_files = sorted(indexed_files, key=lambda item: (item[0], str(item[1])))
+    runs = [load_dxpx(path) for _, path in ordered_files]
+    if not runs:
+        return ()
+
+    run_count = max(run.run_index for run in runs) + 1
+    by_path: dict[str, list[float]] = {}
+    for run in runs:
+        changes = run.header.get("changes")
+        if isinstance(changes, np.ndarray):
+            changes = changes.flat
+        elif isinstance(changes, dict):
+            changes = (changes,)
+        if changes is None:
+            continue
+        for change in changes:
+            if not isinstance(change, dict):
+                continue
+            path = str(change.get("path", ""))
+            value = change.get("value")
+            if (
+                path
+                and isinstance(value, (int, float, np.number))
+                and not isinstance(value, (bool, np.bool_))
+            ):
+                values = by_path.setdefault(path, [float("nan")] * run_count)
+                values[run.run_index] = float(value)
 
     return tuple(
         SweepVariable(path=path, units=None, values=tuple(values))

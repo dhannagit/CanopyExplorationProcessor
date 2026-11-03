@@ -1,7 +1,9 @@
 from pathlib import Path
 
+import numpy as np
 import pytest
 
+from canopy_processor.dxpx import DXPXRun
 from canopy_processor.ui import discover_dataset
 
 
@@ -83,3 +85,34 @@ def test_discover_star_design_variables(tmp_path: Path) -> None:
 	assert result.variables[0].path == "track.temperature"
 	assert result.variables[0].values == (20.0, 30.0, 40.0)
 	assert not any("No numeric sweep variables" in item for item in result.diagnostics)
+
+
+def test_python_converter_discovers_header_changes(monkeypatch, tmp_path: Path) -> None:
+	from canopy_processor import exploration
+
+	study = tmp_path / "PythonStudy"
+	for run_number in (1, 2):
+		run_directory = study / f"CTMP_Run{run_number:02d}"
+		run_directory.mkdir(parents=True)
+		path = run_directory / f"run{run_number:02d}.dXpx"
+		path.touch()
+
+	def fake_load(path: Path) -> DXPXRun:
+		run_number = int(path.parent.name[-2:])
+		pressure = 1.7 + run_number / 10
+		return DXPXRun(path, {
+			"changes": np.array([
+				{"path": "setup.front.pressure", "value": pressure},
+				{"path": "setup.enabled", "value": True},
+			], dtype=object),
+		}, {})
+
+	monkeypatch.setattr(exploration, "load_dxpx", fake_load)
+	result = discover_dataset(study, converter="python")
+
+	assert result.converter == "python"
+	assert result.dxpx_directory == study.resolve()
+	assert result.raw_directory is None
+	assert [(variable.path, variable.values) for variable in result.variables] == [
+		("setup.front.pressure", (1.8, 1.9)),
+	]

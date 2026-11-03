@@ -7,12 +7,13 @@ from copy import deepcopy
 from dataclasses import replace
 from hashlib import sha256
 
-from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QCloseEvent, QKeySequence
+from PySide6.QtCore import Property, QEasingCurve, QPropertyAnimation, QSettings, Qt
+from PySide6.QtGui import QColor, QCloseEvent, QKeySequence, QPainter, QPen
 from PySide6.QtWidgets import (
-	QComboBox,
-	QCheckBox,
 	QAbstractItemView,
+	QAbstractButton,
+	QCheckBox,
+	QComboBox,
 	QDockWidget,
 	QDialog,
 	QFileDialog,
@@ -60,6 +61,7 @@ QMainWindow, QWidget { background: #151a20; color: #d7e0e8; }
 QGroupBox { border: 1px solid #303b45; margin-top: 12px; padding: 12px; font-weight: 600; }
 QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; color: #74d7e8; }
 QPushButton { background: #24333b; border: 1px solid #42616b; padding: 7px 12px; }
+QPushButton:checked { background: #187a8e; border-color: #74d7e8; font-weight: 700; }
 QPushButton:hover { background: #2d4852; border-color: #74d7e8; }
 QPushButton#applyButton { background: #187a8e; border-color: #74d7e8; font-weight: 700; }
 QMenu { background: #151a20; border: 1px solid #303b45; padding: 4px; }
@@ -72,6 +74,61 @@ QLabel#muted { color: #8c9aa5; }
 QProgressBar { border: 1px solid #303b45; text-align: center; }
 QProgressBar::chunk { background: #20a8bd; }
 """
+
+
+class ConverterToggle(QAbstractButton):
+	"""Compact animated selector for MATLAB and Python converters."""
+
+	def __init__(self) -> None:
+		super().__init__()
+		self.setCheckable(True)
+		self.setFixedSize(140, 32)
+		self.setAccessibleName("Converter")
+		self.setToolTip("Select MATLAB or Python converter")
+		self._thumb_position = 2.0
+		self._animation = QPropertyAnimation(self, b"thumbPosition", self)
+		self._animation.setDuration(160)
+		self._animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+		self.toggled.connect(self._animate_thumb)
+
+	@Property(float)
+	def thumbPosition(self) -> float:
+		return self._thumb_position
+
+	@thumbPosition.setter
+	def thumbPosition(self, position: float) -> None:
+		self._thumb_position = position
+		self.update()
+
+	def _animate_thumb(self, python_selected: bool) -> None:
+		self._animation.stop()
+		self._animation.setStartValue(self._thumb_position)
+		self._animation.setEndValue(self.width() / 2 if python_selected else 2.0)
+		self._animation.start()
+
+	def paintEvent(self, event) -> None:
+		painter = QPainter(self)
+		painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+		painter.setPen(QPen(QColor("#42616b")))
+		painter.setBrush(QColor("#10151a"))
+		painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 8, 8)
+		segment_width = self.width() / 2
+		painter.setPen(QPen(QColor("#187a8e")))
+		painter.setBrush(QColor("#187a8e"))
+		painter.drawRoundedRect(
+			int(self._thumb_position), 2, int(segment_width - 4), self.height() - 5, 6, 6
+		)
+		painter.setPen(QColor("#ffffff" if not self.isChecked() else "#8c9aa5"))
+		painter.drawText(0, 0, int(segment_width), self.height(), Qt.AlignmentFlag.AlignCenter, "MATLAB")
+		painter.setPen(QColor("#ffffff" if self.isChecked() else "#8c9aa5"))
+		painter.drawText(
+			int(segment_width), 0, int(segment_width), self.height(),
+			Qt.AlignmentFlag.AlignCenter, "Python",
+		)
+		if self.hasFocus():
+			painter.setPen(QPen(QColor("#74d7e8"), 1))
+			painter.setBrush(Qt.BrushStyle.NoBrush)
+			painter.drawRoundedRect(self.rect().adjusted(1, 1, -2, -2), 8, 8)
 
 
 class SweepVariableTable(QTableWidget):
@@ -146,6 +203,8 @@ class MainWindow(QMainWindow):
 		self._analysis_config: AnalysisConfig | None = None
 		self._document_path: Path | None = None
 		self._restoring = False
+		self._active_converter = "matlab"
+		self._layout_fitted = False
 		self._after_worker = None
 		self.setWindowTitle("Canopy Exploration Processor")
 		self.setMinimumSize(900, 600)
@@ -172,6 +231,22 @@ class MainWindow(QMainWindow):
 		self.phase_list.itemChanged.connect(self._document_changed)
 		self.zone_list.itemChanged.connect(self._document_changed)
 
+	def showEvent(self, event) -> None:
+		super().showEvent(event)
+		self._fit_window_to_layout()
+		self._layout_fitted = True
+
+	def _fit_window_to_layout(self) -> None:
+		# The fixed 900x600 floor can be smaller than the layout needs (fonts, DPI), which squeezes rows into each other.
+		needed = self.minimumSizeHint()
+		screen = self.screen().availableGeometry() if self.screen() else None
+		width, height = max(900, needed.width()), max(600, needed.height())
+		if screen is not None:
+			width, height = min(width, screen.width()), min(height, screen.height())
+		self.setMinimumSize(width, height)
+		if self.width() < width or self.height() < height:
+			self.resize(max(self.width(), width), max(self.height(), height))
+
 	def _open_settings(self) -> None:
 		if self._thread is not None:
 			return
@@ -180,6 +255,60 @@ class MainWindow(QMainWindow):
 			self.settings.setValue(RESOURCE_DIRECTORY_KEY, dialog.resource_directory)
 			self.settings.sync()
 			self.status_label.setText("Settings saved; circuit folder changes apply to the next study load")
+
+	def _selected_converter(self) -> str:
+		return "python" if self.converter_toggle.isChecked() else "matlab"
+
+	def _converter_changed(self, converter: str) -> None:
+		if self._restoring or converter == self._active_converter:
+			return
+		if self._thread is not None:
+			return
+		has_source = self.session.discovery_result is not None or self.session.config.dataset is not None
+		if has_source:
+			if not self._confirm_discard():
+				self._restoring = True
+				try:
+					self.converter_toggle.setChecked(self._active_converter == "python")
+				finally:
+					self._restoring = False
+				return
+			self.session = AnalysisSession()
+			self._source_loaded_dataset = None
+			self._applied_config = None
+			self._analysis_config = None
+			self._document_path = None
+			self._clear_results()
+			self.variable_list.setRowCount(0)
+			self.metric_combo.clear()
+			self.metric_combo.addItem("Select metric")
+			self.phase_list.clear()
+			self.zone_list.clear()
+			self.baseline_run_combo.clear()
+			self._set_track_controls_visible(False)
+			self._set_path_label(self.root_label, None)
+			self._set_path_label(self.raw_label, None)
+			self._set_path_label(self.dxpx_label, None)
+			self.choose_dxpx_button.setEnabled(False)
+			self.confirm_button.setEnabled(False)
+			self._saved_snapshot = self._snapshot_config().to_dict()
+		self._active_converter = converter
+		self._update_loader_controls(converter)
+		if self._layout_fitted:
+			self._fit_window_to_layout()
+		self.status_label.setText("Converter changed; select a study folder to continue")
+		self._document_changed()
+
+	def _update_loader_controls(self, converter: str) -> None:
+		matlab_selected = converter == "matlab"
+		self.select_root_button.setText(
+			"Select raw study folder" if matlab_selected else "Select study directory"
+		)
+		for field in (self.raw_label, self.dxpx_label, self.choose_dxpx_button):
+			field.setVisible(matlab_selected)
+			label = self.dataset_form.labelForField(field)
+			if label is not None:
+				label.setVisible(matlab_selected)
 
 	@staticmethod
 	def _workbook_digest(path: Path | None) -> str | None:
@@ -210,7 +339,12 @@ class MainWindow(QMainWindow):
 		)
 		result = self.session.discovery_result
 		if config.dataset is None and isinstance(result, DiscoveryResult):
-			config.dataset = DatasetConfig(result.dxpx_directory, result.raw_directory, result.circuit_workbook)
+			config.dataset = DatasetConfig(
+				result.dxpx_directory, result.raw_directory, result.circuit_workbook,
+				converter=result.converter,
+			)
+		elif config.dataset is not None and isinstance(result, DiscoveryResult):
+			config.dataset.converter = result.converter
 		if config.dataset and not self.turn_zone_track_combo.isHidden():
 			track = self.turn_zone_track_combo.currentData()
 			if track != config.dataset.track_name:
@@ -312,15 +446,23 @@ class MainWindow(QMainWindow):
 		except (OSError, ValueError, TypeError, KeyError) as error:
 			self.status_label.setText(f"Could not open analysis: {error}")
 			return
-		if dataset is None or dataset.raw_directory is None or dataset.dxpx_directory is None:
+		if (
+			dataset is None or dataset.dxpx_directory is None
+			or (dataset.converter == "matlab" and dataset.raw_directory is None)
+		):
 			self._commit_open(config, Path(selected), original, None, None, None)
 			return
 
 		def operation(token: CancellationToken, progress: object) -> tuple:
-			discovery = discover_dataset(dataset.raw_directory, dataset.circuit_workbook)
-			if discovery.raw_directory is None:
-				raise ValueError("The saved raw directory is not a valid study")
-			discovery = replace(discovery, dxpx_directory=dataset.dxpx_directory)
+			if dataset.converter == "python":
+				discovery = discover_dataset(
+					dataset.dxpx_directory, dataset.circuit_workbook, converter="python"
+				)
+			else:
+				discovery = discover_dataset(dataset.raw_directory, dataset.circuit_workbook)
+				if discovery.raw_directory is None:
+					raise ValueError("The saved raw directory is not a valid study")
+				discovery = replace(discovery, dxpx_directory=dataset.dxpx_directory)
 			loaded = load_dataset(discovery, lambda: token.cancelled, progress)
 			if token.cancelled:
 				return None
@@ -369,9 +511,17 @@ class MainWindow(QMainWindow):
 			self.baseline_run_combo.clear()
 			self._source_loaded_dataset = source
 			self._set_track_controls_visible(False)
-			self._set_path_label(self.root_label, config.dataset.raw_directory if config.dataset else None)
+			root_path = (
+				config.dataset.dxpx_directory if config.dataset and config.dataset.converter == "python"
+				else config.dataset.raw_directory if config.dataset else None
+			)
+			self._set_path_label(self.root_label, root_path)
 			self._set_path_label(self.raw_label, config.dataset.raw_directory if config.dataset else None)
 			self._set_path_label(self.dxpx_label, config.dataset.dxpx_directory if config.dataset else None)
+			converter = config.dataset.converter if config.dataset else "matlab"
+			self._active_converter = converter
+			self.converter_toggle.setChecked(converter == "python")
+			self._update_loader_controls(converter)
 			if discovery:
 				self._discovery_succeeded(discovery)
 			if loaded:
@@ -503,6 +653,20 @@ class MainWindow(QMainWindow):
 		dataset_form = QFormLayout(dataset)
 		self.analysis_name = QLineEdit("Exploration Analysis")
 		dataset_form.addRow("Analysis name:", self.analysis_name)
+		self.dataset_form = dataset_form
+		converter_row = QWidget()
+		converter_layout = QHBoxLayout(converter_row)
+		converter_layout.setContentsMargins(0, 0, 0, 0)
+		converter_layout.setSpacing(8)
+		self.converter_label = QLabel("Converter?")
+		self.converter_toggle = ConverterToggle()
+		self.converter_toggle.toggled.connect(
+			lambda checked: self._converter_changed("python" if checked else "matlab")
+		)
+		converter_layout.addWidget(self.converter_label)
+		converter_layout.addWidget(self.converter_toggle)
+		converter_layout.addStretch(1)
+		dataset_form.addRow(converter_row)
 		self.root_label = QLabel("No root selected")
 		self.root_label.setObjectName("muted")
 		self.root_label.setWordWrap(True)
@@ -513,16 +677,19 @@ class MainWindow(QMainWindow):
 		self.dxpx_label = QLabel("Not detected")
 		self.dxpx_label.setObjectName("muted")
 		self.dxpx_label.setWordWrap(True)
-		select_root = QPushButton("Select raw study folder")
-		select_root.clicked.connect(self._select_raw_study)
-		dataset_form.addRow(select_root)
+		self.select_root_button = QPushButton("Select raw study folder")
+		self.select_root_button.setMinimumHeight(34)
+		self.select_root_button.clicked.connect(self._select_raw_study)
+		dataset_form.addRow(self.select_root_button)
 		dataset_form.addRow("Study:", self.root_label)
 		dataset_form.addRow("Raw:", self.raw_label)
 		dataset_form.addRow("DXPX:", self.dxpx_label)
 		self.choose_dxpx_button = QPushButton("Choose DXPX folder")
+		self.choose_dxpx_button.setMinimumHeight(34)
 		self.choose_dxpx_button.setEnabled(False)
 		self.choose_dxpx_button.clicked.connect(self._choose_dxpx)
 		dataset_form.addRow(self.choose_dxpx_button)
+		self._update_loader_controls("matlab")
 		top_row.addWidget(dataset, 1)
 
 		variables = QGroupBox("Sweep variables")
@@ -538,6 +705,7 @@ class MainWindow(QMainWindow):
 		self.variable_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 		variables_layout.addWidget(self.variable_list)
 		self.confirm_button = QPushButton("Confirm variables")
+		self.confirm_button.setMinimumHeight(34)
 		self.confirm_button.setEnabled(False)
 		self.confirm_button.clicked.connect(self._confirm_variables)
 		variables_layout.addWidget(self.confirm_button)
@@ -695,7 +863,12 @@ class MainWindow(QMainWindow):
 	def _select_raw_study(self) -> None:
 		if self._thread is not None or not self._confirm_discard():
 			return
-		path = QFileDialog.getExistingDirectory(self, "Select one raw StudyName folder")
+		converter = self._selected_converter()
+		prompt = (
+			"Select one raw StudyName folder" if converter == "matlab"
+			else "Select Python study directory"
+		)
+		path = QFileDialog.getExistingDirectory(self, prompt)
 		if path:
 			self.root_label.setText(path)
 			self.root_label.setToolTip(path)
@@ -716,12 +889,13 @@ class MainWindow(QMainWindow):
 
 	def _start_discovery(self, path: str) -> None:
 		workbook = circuit_workbook(self.settings.value(RESOURCE_DIRECTORY_KEY, "", type=str))
+		converter = self._selected_converter()
 
 		def operation(token: CancellationToken, progress: object) -> DiscoveryResult:
 			progress("Scanning source folders", 1, 2)
 			if token.cancelled:
 				return None
-			result = discover_dataset(path, workbook)
+			result = discover_dataset(path, workbook, converter=converter)
 			progress("Reading sweep metadata", 2, 2)
 			return result
 
@@ -745,10 +919,20 @@ class MainWindow(QMainWindow):
 		self.progress.setValue(value)
 
 	def _discovery_succeeded(self, result: DiscoveryResult) -> None:
+		self._active_converter = result.converter
+		self._restoring = True
+		try:
+			self.converter_toggle.setChecked(result.converter == "python")
+		finally:
+			self._restoring = False
+		self.select_root_button.setText(
+			"Select raw study folder" if result.converter == "matlab" else "Select study directory"
+		)
+		self._update_loader_controls(result.converter)
 		self.session.finish_discovery(result.variables, list(result.diagnostics), result)
 		self._set_path_label(self.raw_label, result.raw_directory)
 		self._set_path_label(self.dxpx_label, result.dxpx_directory)
-		self.choose_dxpx_button.setEnabled(result.raw_directory is not None)
+		self.choose_dxpx_button.setEnabled(result.converter == "matlab" and result.raw_directory is not None)
 		self.variable_list.clear()
 		self.variable_list.setColumnCount(4)
 		self.variable_list.setHorizontalHeaderLabels(["Variable", "Role", "Display name", "Units"])
@@ -768,7 +952,10 @@ class MainWindow(QMainWindow):
 		if not result.variables:
 			self.variable_list.setRowCount(1)
 			self.variable_list.setItem(0, 0, QTableWidgetItem("No numeric sweep variables found"))
-		self.confirm_button.setEnabled(bool(result.variables) and result.dxpx_directory is not None and result.raw_directory is not None)
+		self.confirm_button.setEnabled(
+			bool(result.variables) and result.dxpx_directory is not None
+			and (result.converter == "python" or result.raw_directory is not None)
+		)
 		self.status_label.setText(self._discovery_status(result))
 		self.status_label.setToolTip("\n".join(result.diagnostics))
 		self._document_changed()
@@ -809,6 +996,7 @@ class MainWindow(QMainWindow):
 			exploration=result.exploration,
 			diagnostics=result.diagnostics,
 			dxpx_candidates=result.dxpx_candidates,
+			converter=result.converter,
 		)
 		self.session.discovery_result = updated
 		if self.session.config.dataset:
@@ -838,7 +1026,10 @@ class MainWindow(QMainWindow):
 		if self._thread is not None:
 			return
 		result = self.session.discovery_result
-		if not isinstance(result, DiscoveryResult) or result.dxpx_directory is None or result.raw_directory is None:
+		if (
+			not isinstance(result, DiscoveryResult) or result.dxpx_directory is None
+			or (result.converter == "matlab" and result.raw_directory is None)
+		):
 			return
 		selected_rows = sorted({index.row() for index in self.variable_list.selectionModel().selectedRows()})
 		assigned_rows = {
@@ -856,12 +1047,14 @@ class MainWindow(QMainWindow):
 			and dataset.dxpx_directory == result.dxpx_directory
 			and dataset.raw_directory == result.raw_directory
 			and dataset.circuit_workbook == result.circuit_workbook
+			and dataset.converter == result.converter
 		)
 		if not reuse_loaded:
 			self.session.config.dataset = DatasetConfig(
 				dxpx_directory=result.dxpx_directory,
 				raw_directory=result.raw_directory,
 				circuit_workbook=result.circuit_workbook,
+				converter=result.converter,
 			)
 		self.session.config.sweep_variables = []
 		for row in selected_rows:
@@ -956,7 +1149,7 @@ class MainWindow(QMainWindow):
 				self.zone_list.setToolTip("Confirm a circuit above to generate turn-zone masks")
 		self.baseline_run_combo.clear()
 		for run in loaded.runs:
-			self.baseline_run_combo.addItem(f"Run {run.path.parent.name}", int(run.path.parent.name))
+			self.baseline_run_combo.addItem(f"Run {run.path.parent.name}", run.run_index)
 		self._baseline_mode_changed()
 		if loaded.diagnostics:
 			self.status_label.setText(f"Loaded {len(loaded.runs)} run(s) with {len(loaded.diagnostics)} diagnostic(s)")

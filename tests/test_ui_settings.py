@@ -154,7 +154,7 @@ def test_discovery_snapshots_saved_resource_folder(application, monkeypatch, tmp
     observed = []
     monkeypatch.setattr(
         "canopy_processor.ui.main_window.discover_dataset",
-        lambda root, path: observed.append(path),
+        lambda root, path, **kwargs: observed.append(path),
     )
     window._start_discovery(str(tmp_path))
     settings.setValue(RESOURCE_DIRECTORY_KEY, str(tmp_path / "different"))

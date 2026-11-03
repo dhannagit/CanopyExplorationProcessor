@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import pytest
 import numpy as np
 from openpyxl import Workbook
@@ -7,7 +8,7 @@ from openpyxl import Workbook
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QFileDialog, QGroupBox, QHeaderView, QScrollArea, QMessageBox
-from PySide6.QtCore import QPoint, Qt, QEventLoop, QTimer
+from PySide6.QtCore import QPoint, QRect, Qt, QEventLoop, QTimer
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtTest import QTest
 
@@ -114,9 +115,12 @@ def test_converter_control_switches_source_mode() -> None:
 	application.processEvents()
 
 
-def test_initial_show_fits_window_to_layout_without_overlapping_dataset_rows() -> None:
+@pytest.mark.parametrize("screen_size", [(800, 800), (1920, 1080)])
+def test_initial_show_fits_window_to_layout_without_overlapping_dataset_rows(monkeypatch, screen_size) -> None:
 	application = QApplication.instance() or QApplication([])
 	window = MainWindow()
+	available = QRect(0, 0, *screen_size)
+	monkeypatch.setattr(window, "screen", lambda: SimpleNamespace(availableGeometry=lambda: available))
 	font_path = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts/segoeui.ttf"
 	if font_path.is_file():
 		font_id = QFontDatabase.addApplicationFont(str(font_path))
@@ -128,10 +132,12 @@ def test_initial_show_fits_window_to_layout_without_overlapping_dataset_rows() -
 
 	assert window._layout_fitted
 	needed = window.minimumSizeHint()
-	assert window.minimumSize().width() >= needed.width()
-	assert window.minimumSize().height() >= needed.height()
-	assert window.width() >= needed.width()
-	assert window.height() >= needed.height()
+	expected_width = min(max(900, needed.width()), available.width())
+	expected_height = min(max(600, needed.height()), available.height())
+	assert window.minimumSize().width() == expected_width
+	assert window.minimumSize().height() == expected_height
+	assert window.width() >= expected_width
+	assert window.height() >= expected_height
 	dataset = window.findChild(QGroupBox, "datasetGroup")
 	assert dataset.height() >= dataset.minimumSizeHint().height()
 	toggle_row = window.converter_toggle.parentWidget()

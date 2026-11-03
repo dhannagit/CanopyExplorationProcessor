@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from ..dxpx import DXPXRun, load_dxpx
+from ..dxpx import DXPXRun, load_dxpx, run_index_from_path
 from ..analysis import analyze_runs
 from ..config import AnalysisConfig
 from ..plot_data import build_plot_data, resolve_plot
@@ -121,10 +121,16 @@ def load_dataset(
 
 	if discovery.dxpx_directory is None:
 		raise FileNotFoundError("No DXPX directory was discovered")
-	files = sorted(
-		(path for path in discovery.dxpx_directory.rglob("*.dXpx") if path.parent.name.isdigit()),
-		key=lambda path: (int(path.parent.name), str(path)),
-	)
+	files = [
+		path for path in discovery.dxpx_directory.rglob("*")
+		if path.is_file() and path.suffix.lower() == ".dxpx"
+	]
+	if discovery.converter == "python":
+		files = [path for path in files if _has_run_index(path)]
+		files.sort(key=lambda path: (run_index_from_path(path), str(path)))
+	else:
+		files = [path for path in files if path.parent.name.isdigit()]
+		files.sort(key=lambda path: (int(path.parent.name), str(path)))
 	if not files:
 		raise FileNotFoundError(f"No numbered .dXpx files found below {discovery.dxpx_directory}")
 
@@ -157,6 +163,14 @@ def load_dataset(
 	else:
 		diagnostics.append("No simulation runs were loaded")
 	return LoadedDataset(tuple(runs), metrics, tuple(diagnostics))
+
+
+def _has_run_index(path: Path) -> bool:
+	try:
+		run_index_from_path(path)
+		return True
+	except ValueError:
+		return False
 
 
 def prepare_turn_zones(

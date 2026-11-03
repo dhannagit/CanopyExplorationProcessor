@@ -26,9 +26,10 @@ REPOSITORY_ROOT = os.path.dirname(os.path.dirname(__file__))
 
 
 @pytest.fixture(autouse=True)
-def isolated_settings(monkeypatch, tmp_path):
+def isolated_settings(monkeypatch, tmp_path, request):
 	settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
-	settings.setValue(RESOURCE_DIRECTORY_KEY, REPOSITORY_ROOT)
+	resource_directory = REPOSITORY_ROOT if request.node.get_closest_marker("local_data") else str(tmp_path)
+	settings.setValue(RESOURCE_DIRECTORY_KEY, resource_directory)
 	monkeypatch.setattr("canopy_processor.ui.main_window.create_settings", lambda: settings)
 	monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Discard)
 	monkeypatch.setattr(QMessageBox, "information", lambda *args: QMessageBox.StandardButton.Ok)
@@ -80,6 +81,71 @@ def test_main_window_builds_workbench() -> None:
 	window.close()
 	application.processEvents()
 	del window
+	application.processEvents()
+
+
+def test_converter_control_switches_source_mode() -> None:
+	application = QApplication.instance() or QApplication([])
+	window = MainWindow()
+	assert window.converter_label.text() == "Converter?"
+	assert window.converter_toggle.width() == 140
+	assert window.converter_toggle.height() == 32
+	window.show()
+	for width in (900, 1100, 1920):
+		window.resize(width, 900)
+		application.processEvents()
+		row = window.converter_toggle.parentWidget()
+		assert window.converter_label.geometry().right() < window.converter_toggle.geometry().left()
+		assert window.converter_toggle.geometry().right() <= row.rect().right()
+		assert window.converter_toggle.size().width() == 140
+	window.converter_toggle.setChecked(True)
+	assert window._selected_converter() == "python"
+	assert window.select_root_button.text() == "Select study directory"
+	assert window.raw_label.isHidden()
+	assert window.dxpx_label.isHidden()
+	assert window.choose_dxpx_button.isHidden()
+	window.converter_toggle.setChecked(False)
+	assert window._selected_converter() == "matlab"
+	assert window.select_root_button.text() == "Select raw study folder"
+	assert not window.raw_label.isHidden()
+	assert not window.dxpx_label.isHidden()
+	assert not window.choose_dxpx_button.isHidden()
+	window.close()
+	application.processEvents()
+
+
+def test_initial_show_fits_window_to_layout_without_overlapping_dataset_rows() -> None:
+	application = QApplication.instance() or QApplication([])
+	window = MainWindow()
+	font_path = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts/segoeui.ttf"
+	if font_path.is_file():
+		font_id = QFontDatabase.addApplicationFont(str(font_path))
+		families = QFontDatabase.applicationFontFamilies(font_id)
+		if families:
+			window.setFont(QFont(families[0], 10))
+	window.show()
+	application.processEvents()
+
+	assert window._layout_fitted
+	needed = window.minimumSizeHint()
+	assert window.minimumSize().width() >= needed.width()
+	assert window.minimumSize().height() >= needed.height()
+	assert window.width() >= needed.width()
+	assert window.height() >= needed.height()
+	dataset = window.findChild(QGroupBox, "datasetGroup")
+	assert dataset.height() >= dataset.minimumSizeHint().height()
+	toggle_row = window.converter_toggle.parentWidget()
+	assert toggle_row.geometry().bottom() < window.select_root_button.geometry().top()
+	for button in (window.select_root_button, window.choose_dxpx_button, window.confirm_button):
+		assert button.minimumHeight() >= 34
+		text = button.fontMetrics().boundingRect(
+			button.rect(), Qt.AlignmentFlag.AlignCenter, button.text()
+		)
+		assert text.top() >= 0
+		assert text.bottom() < button.height()
+		assert button.geometry().bottom() <= button.parentWidget().rect().bottom()
+
+	window.close()
 	application.processEvents()
 
 
@@ -645,9 +711,13 @@ def test_new_raw_study_selection_rediscoveries_variables(monkeypatch, tmp_path: 
 	first_variable = SweepVariable("setup.first", "bar", (1.0,))
 	second_variable = SweepVariable("setup.second", "deg", (2.0,))
 
-	def fake_discovery(path: str, circuit_workbook: Path | None = None) -> DiscoveryResult:
+	def fake_discovery(
+		path: str, circuit_workbook: Path | None = None, *, converter: str = "matlab"
+	) -> DiscoveryResult:
 		variable = first_variable if Path(path) == first else second_variable
-		return DiscoveryResult(Path(path), Path(path) / "dxpx", Path(path), None, (variable,), None, ())
+		return DiscoveryResult(
+			Path(path), Path(path) / "dxpx", Path(path), None, (variable,), None, (), converter=converter
+		)
 
 	monkeypatch.setattr("canopy_processor.ui.main_window.discover_dataset", fake_discovery)
 	for path, expected in ((first, first_variable), (second, second_variable)):

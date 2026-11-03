@@ -112,19 +112,48 @@ builds, CI setup, artifact downloads, signing considerations, upgrades and rollb
 You can analyze a sweep without a circuit workbook, corner-phase filters or turn-zone
 filters. Start with a simple plot of one metric against one sweep variable:
 
-1. In the **Analysis** tab, click **Select raw study folder**. Select one study's
-	folder containing its numbered job folders, not the parent holding many studies.
-2. Check the detected **Raw** and **DXPX** paths. If the matching simulation outputs
-	were not found automatically, click **Choose DXPX folder** and select that study's
-	output folder.
-3. In **Sweep variables**, select the variable's row and set its **Role** to the desired
-    input position (x, y, facet). Click **Confirm variables** and wait for the runs to 
-    finish loading.
-4. Under **Analysis settings**, select a **Metric**. Keep **Plot** on **Suggested
+### Load A Study From Either Converter
+
+In the **Analysis** tab, set **Converter?** to **MATLAB** or **Python**, according
+to the converter that produced your DXPX files. This selects the input format;
+you do not need MATLAB installed to analyze already-converted files.
+
+**MATLAB-converted files (raw study and DXPX outputs)**
+
+1. Select **MATLAB**, then click **Select raw study folder**.
+2. Select one study's folder containing its numbered job folders and exploration
+	metadata under `DATA_Raw`, not a numbered run folder or a parent holding many
+	studies. The raw metadata supplies the sweep variables.
+3. Check the detected **Raw** and **DXPX** paths. If the matching outputs were not
+	found automatically, click **Choose DXPX folder** and select that study's DXPX
+	output folder containing the run folders.
+
+**Python-converted files (DXPX outputs only)**
+
+1. Select **Python**, then click **Select study directory**.
+2. Select the single study folder containing its converted run folders and DXPX
+	files, not an individual run folder or a parent holding several studies.
+3. The processor reads the numeric sweep variables from `D.Header.changes` inside
+	the DXPX files. No raw study folder or exploration JSON/CSV files are required.
+	The separate **Raw**, **DXPX**, and **Choose DXPX folder** controls are hidden
+	because the selected study directory already contains the outputs.
+
+Both modes populate **Sweep variables**. If no variables appear, confirm the
+converter selection and study folder; for Python-converted files, check that the
+DXPX headers contain numeric `changes` entries. Switching converters clears the
+current study and results after any required discard confirmation, so select a
+study again after switching.
+
+### Analyze The Loaded Study
+
+1. In **Sweep variables**, select the variable's row and set its **Role** to the
+	desired input position (x, y, facet). For a simple plot, assign one variable to
+	**x**. Click **Confirm variables** and wait for the runs to finish loading.
+2. Under **Analysis settings**, select a **Metric**. Keep **Plot** on **Suggested
 	plot** and **Baseline** on **No baseline** for the simplest starting point.
-5. Leave every checkbox in **Phases** and **Turn zones** unchecked. An empty filter
+3. Leave every checkbox in **Phases** and **Turn zones** unchecked. An empty filter
 	selection means no restriction, not an empty result. Skip track/zone preparation.
-6. Click **Apply / Analyze**, then view the plot and per-run values in **Results**.
+4. Click **Apply / Analyze**, then view the plot and per-run values in **Results**.
 
 With no filters, time-series metrics are reduced over all available samples in each
 run. Scalar metrics, such as a precomputed lap-time value, are used as supplied.
@@ -216,9 +245,13 @@ fixture-independent tests across the test modules:
 .\.venv\Scripts\python.exe -m pytest -m "not local_data" -q --basetemp (Join-Path $env:TEMP ('canopy-exploration-processor-ci-tests-' + [guid]::NewGuid().ToString('N')))
 ```
 
-To run the real-data integration tests as well, ask a maintainer for an approved
-sample or use compatible Canopy data you are authorized to access. Place the
-contents, not archives, in the ignored `DATA_Raw`, `DATA_dXpx`, and
+To run the real-data integration tests as well, use compatible Canopy simulation
+data you are authorized to access. Each developer may provision their own samples;
+no shared dataset source is required. There are two separate local data layouts.
+
+### MATLAB-Converted Samples
+
+Place the contents, not archives, in the ignored `DATA_Raw`, `DATA_dXpx`, and
 `BaselineExample` folders at the repository root. The test data must include a
 raw exploration with metadata, at least two numeric sweep variables, its paired
 numbered DXPX runs, `gCarPotential`, phase data for GUI filter coverage, a
@@ -226,10 +259,50 @@ multi-lap baseline, and a circuit workbook containing the paired run's track.
 Keep the workbook at the repository root as
 `CircuitsData_Canopy_Hypercar.xlsx`.
 
-These folders and workbook are ignored by Git. Keep their contents local: do not
-force-add, commit, package, or upload them to GitLab. Check the ignore behavior
-before staging changes. Run the local-data profile, then the combined suite, before
-committing:
+### Python-Converted Samples
+
+Provision exactly one representative Python-converted study in `convert-python`
+at the repository root. Preserve its run folder names and file structure:
+
+```text
+convert-python/
+	.gitkeep
+	YourStudyName/
+		YourRun_Run01/
+			run.dXpx
+		YourRun_Run02/
+			run.dXpx
+```
+
+The study and filenames above are examples, not required names. Use indexed run
+folders supported by the converter, with one DXPX file per run and unique run
+indices. The DXPX files must contain numeric sweep-variable entries in
+`D.Header.changes` and signals for at least one supported analysis metric. Keep
+all files from the same study together; do not combine unrelated studies under
+one run index.
+
+Python-converted discovery reads changed variables directly from DXPX headers.
+It does not require `DATA_Raw`, exploration JSON/CSV files, or a circuit workbook.
+The local integration test checks discovery, run-index alignment, loading, and
+analysis against these actual files. Synthetic converter tests also run in GitLab
+without accessing this folder.
+
+### Run The Test Profiles
+
+All four data folders and the workbook are ignored by Git; only the folder
+placeholders are intended for source control. Ignore rules do not remove files
+already tracked by Git. Keep sample contents local: do not force-add, commit,
+package, cache, or upload them to GitLab. Review staged files before committing.
+Full local testing requires both sample layouts. Missing local prerequisites fail
+with provisioning instructions rather than silently skipping coverage.
+
+To check only the real Python-converter sample, run:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_ui_pipeline.py -m local_data -k python_converter -q --basetemp (Join-Path $env:TEMP ('canopy-exploration-processor-python-data-' + [guid]::NewGuid().ToString('N')))
+```
+
+Run the local-data profile, then the combined suite, before committing:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -m local_data -q --basetemp (Join-Path $env:TEMP ('canopy-exploration-processor-local-data-' + [guid]::NewGuid().ToString('N')))

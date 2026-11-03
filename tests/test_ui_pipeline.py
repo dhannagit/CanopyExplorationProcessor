@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 import numpy as np
+from scipy.io import savemat
 
 from canopy_processor import (
 	AnalysisConfig,
@@ -16,6 +17,75 @@ from canopy_processor.dxpx import DXPXRun
 from canopy_processor.metric import source_metric
 from canopy_processor.ui import discover_dataset, load_dataset
 from canopy_processor.ui.pipeline import LoadedDataset, analyze_loaded_dataset, prepare_turn_zones
+
+
+def test_python_converter_header_changes_load_and_join(tmp_path: Path) -> None:
+	study = tmp_path / "PythonStudy"
+	for run_number, (front, rear) in enumerate(((1.8, 2.0), (1.9, 2.1)), start=1):
+		run_directory = study / f"CTMP_Run{run_number:02d}"
+		run_directory.mkdir(parents=True)
+		changes = np.empty((1, 2), dtype=object)
+		changes[0, 0] = {"path": "setup.front.pressure", "value": front}
+		changes[0, 1] = {"path": "setup.rear.pressure", "value": rear}
+		savemat(run_directory / "run.dXpx", {
+			"D": {
+				"Header": {"TrackName": "CTMP", "changes": changes},
+				"Data": {
+					"sLap": np.array([0.0, 1.0, 2.0]),
+					"gCarPotential": np.array([1.0, 2.0 + run_number, 3.0]),
+				},
+			},
+		})
+
+	discovery = discover_dataset(study, converter="python")
+	loaded = load_dataset(discovery)
+	config = AnalysisConfig(
+		dataset=DatasetConfig(dxpx_directory=study, converter="python"),
+		sweep_variables=[
+			SweepVariableConfig("setup.front.pressure", role="x"),
+			SweepVariableConfig("setup.rear.pressure", role="y"),
+		],
+		metric="gCarPotential",
+		plot=PlotConfig(plot_type="heatmap"),
+	)
+	config.validate_ready()
+	assert AnalysisConfig.from_dict(config.to_dict()).dataset.converter == "python"
+	output = analyze_loaded_dataset(loaded, config, discovery.variables)
+
+	assert len(loaded.runs) == 2
+	assert [run.run_index for run in loaded.runs] == [0, 1]
+	assert [row.sweep_values for row in output.rows] == [
+		{"setup.front.pressure": 1.8, "setup.rear.pressure": 2.0},
+		{"setup.front.pressure": 1.9, "setup.rear.pressure": 2.1},
+	]
+
+
+@pytest.mark.local_data
+def test_python_converter_local_study_loads_without_raw_data(python_converter_study: Path) -> None:
+	discovery = discover_dataset(python_converter_study, converter="python")
+	assert discovery.raw_directory is None
+	assert discovery.circuit_workbook is None
+	assert discovery.variables, "Python-converted samples must contain numeric Header.changes"
+	assert len({variable.path for variable in discovery.variables}) == len(discovery.variables)
+	loaded = load_dataset(discovery)
+	assert loaded.runs
+	assert loaded.metrics, "Python-converted samples must contain a supported metric"
+	indices = [run.run_index for run in loaded.runs]
+	assert indices == sorted(indices)
+	assert len(set(indices)) == len(indices)
+	assert all(len(variable.values) > max(indices) for variable in discovery.variables)
+	variable = discovery.variables[0]
+	config = AnalysisConfig(
+		dataset=DatasetConfig(dxpx_directory=python_converter_study, converter="python"),
+		sweep_variables=[SweepVariableConfig(variable.path, role="x")],
+		metric=next(iter(loaded.metrics)),
+		plot=PlotConfig(plot_type="line"),
+	)
+	output = analyze_loaded_dataset(loaded, config, discovery.variables)
+	assert len(output.rows) == len(loaded.runs)
+	for row, run in zip(output.rows, loaded.runs):
+		assert row.run_index == run.run_index
+		assert row.sweep_values[variable.path] == pytest.approx(variable.values[run.run_index], nan_ok=True)
 
 
 @pytest.mark.local_data

@@ -61,6 +61,34 @@ def test_python_converter_header_changes_load_and_join(tmp_path: Path) -> None:
 
 
 @pytest.mark.local_data
+def test_python_converter_local_study_loads_without_raw_data(python_converter_study: Path) -> None:
+	discovery = discover_dataset(python_converter_study, converter="python")
+	assert discovery.raw_directory is None
+	assert discovery.circuit_workbook is None
+	assert discovery.variables, "Python-converted samples must contain numeric Header.changes"
+	assert len({variable.path for variable in discovery.variables}) == len(discovery.variables)
+	loaded = load_dataset(discovery)
+	assert loaded.runs
+	assert loaded.metrics, "Python-converted samples must contain a supported metric"
+	indices = [run.run_index for run in loaded.runs]
+	assert indices == sorted(indices)
+	assert len(set(indices)) == len(indices)
+	assert all(len(variable.values) > max(indices) for variable in discovery.variables)
+	variable = discovery.variables[0]
+	config = AnalysisConfig(
+		dataset=DatasetConfig(dxpx_directory=python_converter_study, converter="python"),
+		sweep_variables=[SweepVariableConfig(variable.path, role="x")],
+		metric=next(iter(loaded.metrics)),
+		plot=PlotConfig(plot_type="line"),
+	)
+	output = analyze_loaded_dataset(loaded, config, discovery.variables)
+	assert len(output.rows) == len(loaded.runs)
+	for row, run in zip(output.rows, loaded.runs):
+		assert row.run_index == run.run_index
+		assert row.sweep_values[variable.path] == pytest.approx(variable.values[run.run_index], nan_ok=True)
+
+
+@pytest.mark.local_data
 def test_analyze_loaded_exploration_builds_heatmap_data(sample_exploration) -> None:
 	discovery = discover_dataset(sample_exploration.raw_directory, sample_exploration.workbook)
 	loaded = load_dataset(discovery)

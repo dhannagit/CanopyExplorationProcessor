@@ -12,6 +12,8 @@ __pycache__/
 !/DATA_dXpx/.gitkeep
 /BaselineExample/*
 !/BaselineExample/.gitkeep
+/convert-python/*
+!/convert-python/.gitkeep
 *.m
 *.xlsx
 build/

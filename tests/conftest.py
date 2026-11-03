@@ -9,6 +9,16 @@ from scipy.io import savemat
 REPOSITORY_ROOT = Path(__file__).parents[1]
 
 
+def pytest_collection_modifyitems(items):
+    local_fixtures = {
+        "sample_dxpx", "sample_exploration", "sample_baseline_dxpx",
+        "multi_lap_baseline_dxpx", "python_converter_study",
+    }
+    for item in items:
+        if local_fixtures.intersection(item.fixturenames) and item.get_closest_marker("local_data") is None:
+            raise pytest.UsageError(f"{item.nodeid} uses protected sample fixtures but is not marked local_data")
+
+
 def _write_synthetic_dxpx(path: Path, lap_count: int) -> Path:
     laps = [
         {
@@ -53,6 +63,30 @@ def _require_files(directory: Path, pattern: str, purpose: str) -> tuple[Path, .
 @pytest.fixture
 def sample_dxpx() -> Path:
     return _require_files(REPOSITORY_ROOT / "DATA_dXpx", "*.dXpx", "DXPX parsing")[0]
+
+
+@pytest.fixture
+def python_converter_study() -> Path:
+    from canopy_processor.dxpx import run_index_from_path
+
+    root = REPOSITORY_ROOT / "convert-python"
+    files = _require_files(root, "*", "Python-converted DXPX discovery")
+    study_directories = set()
+    for path in files:
+        if not path.is_file() or path.suffix.lower() != ".dxpx":
+            continue
+        try:
+            run_index_from_path(path)
+        except ValueError:
+            continue
+        study_directories.add(path.parent.parent)
+    if len(study_directories) != 1:
+        pytest.fail(
+            "Provision exactly one Python-converted study under convert-python/StudyName, "
+            "with indexed run folders containing DXPX files and numeric Header.changes. "
+            "No raw study files or workbook are required for these converter tests."
+        )
+    return study_directories.pop()
 
 
 @pytest.fixture

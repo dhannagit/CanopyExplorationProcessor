@@ -26,9 +26,10 @@ REPOSITORY_ROOT = os.path.dirname(os.path.dirname(__file__))
 
 
 @pytest.fixture(autouse=True)
-def isolated_settings(monkeypatch, tmp_path):
+def isolated_settings(monkeypatch, tmp_path, request):
 	settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
-	settings.setValue(RESOURCE_DIRECTORY_KEY, REPOSITORY_ROOT)
+	resource_directory = REPOSITORY_ROOT if request.node.get_closest_marker("local_data") else str(tmp_path)
+	settings.setValue(RESOURCE_DIRECTORY_KEY, resource_directory)
 	monkeypatch.setattr("canopy_processor.ui.main_window.create_settings", lambda: settings)
 	monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Discard)
 	monkeypatch.setattr(QMessageBox, "information", lambda *args: QMessageBox.StandardButton.Ok)

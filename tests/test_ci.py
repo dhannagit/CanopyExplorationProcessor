@@ -30,7 +30,7 @@ def test_public_commands_use_full_product_name():
 
 def test_local_sample_roots_are_present_but_their_contents_are_ignored():
     ignore_rules = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
-    for directory in ("DATA_Raw", "DATA_dXpx", "BaselineExample"):
+    for directory in ("DATA_Raw", "DATA_dXpx", "BaselineExample", "convert-python"):
         assert f"/{directory}/*" in ignore_rules
         assert f"!/{directory}/.gitkeep" in ignore_rules
         assert (ROOT / directory / ".gitkeep").is_file()
@@ -113,7 +113,7 @@ def test_pipeline_is_opt_in_protected_and_artifact_only():
         assert not any(
             protected_name in path
             for path in artifact_paths
-            for protected_name in ("DATA_Raw", "DATA_dXpx", "BaselineExample", "CircuitsData_Canopy_Hypercar.xlsx")
+            for protected_name in ("DATA_Raw", "DATA_dXpx", "BaselineExample", "convert-python", "CircuitsData_Canopy_Hypercar.xlsx")
         )
     assert not any("push" in name or "publish" in name for name in pipeline if isinstance(pipeline[name], dict))
 
